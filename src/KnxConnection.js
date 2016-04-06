@@ -77,7 +77,7 @@ util.inherits(KnxConnection, EventEmitter);
  Unlimited string 8859_1            .                       DPT 24	    DPT 24
  List 3-byte value                  3 Byte                  DPT 232	    DPT 232	RGB[0,0,0]...[255,255,255]
  */
-KnxConnection.prototype.Action = function (address, data) {
+KnxConnection.prototype.Action = function (address, data, callback) {
     if (!Buffer.isBuffer(data)) {
         var buf = null;
         switch (typeof(data)) {
@@ -115,10 +115,10 @@ KnxConnection.prototype.Action = function (address, data) {
         data = buf;
     }
     if (this.debug)
-        console.log("[%s] Sending %s to %s.", this.ClassName, data, address);
-    this.knxSender.Action(address, data);
+        console.log("[%s] Sending %s to %s.", this.ClassName, JSON.stringify(data), JSON.stringify(address));
+    this.knxSender.Action(address, data, callback);
     if (this.debug)
-        console.log("[%s] Sent %s to %s.", this.ClassName, data, address);
+        console.log("[%s] Sent %s to %s.", this.ClassName, JSON.stringify(data), JSON.stringify(address));
 }
 
 // TODO: It would be good to make a type for address, to make sure not any random string can be passed in
@@ -128,21 +128,10 @@ KnxConnection.prototype.Action = function (address, data) {
 /// <param name="address"></param>
 KnxConnection.prototype.RequestStatus = function (address, callback) {
     if (this.debug)
-        console.log("[%s] Sending request status to %s.", this.ClassName, address);
+        console.log("[%s] Sending request status to %s.", this.ClassName, JSON.stringify(address));
     this.knxSender.RequestStatus(address, callback);
     if (this.debug)
-        console.log("[%s] Sent request status to %s.", this.ClassName, address);
-}
-
-/// <summary>
-///     Convert a value received from KNX using datapoint translator, e.g.,
-///     get a temperature value in Celsius
-/// </summary>
-/// <param name="type">Datapoint type, e.g.: 9.001</param>
-/// <param name="data">Data to convert</param>
-/// <returns></returns>
-KnxConnection.prototype.FromDataPoint = function (type, /*buffer*/data) {
-    return DataPointTranslator.Instance.FromDataPoint(type, data);
+        console.log("[%s] Sent request status to %s.", this.ClassName, JSON.stringify(address));
 }
 
 /// <summary>
