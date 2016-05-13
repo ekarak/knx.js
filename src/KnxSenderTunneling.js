@@ -1,50 +1,16 @@
 /**
  * Created by aborovsky on 24.08.2015.
+ * refactored by ekarakou
  */
 var util = require('util');
 var KnxSender = require('./KnxSender');
 
-function KnxSenderTunneling(/*KnxConnection*/ connection, udpClient, remoteEndpoint) {
-    KnxSenderTunneling.super_.call(this, connection, udpClient, remoteEndpoint);
+function KnxSenderTunneling(/*KnxConnection*/ connection) {
+    KnxSenderTunneling.super_.call(this, connection);
     this.connection = connection;
-    this._udpClient = udpClient;
-    this._remoteEndpoint = remoteEndpoint;
 }
 util.inherits(KnxSenderTunneling, KnxSender);
 
-KnxSenderTunneling.prototype.SetClient = function (/*UdpClient*/ client) {
-    this._udpClient = client;
-}
-
-KnxSenderTunneling.prototype.SendDataSingle = function (/*buffer*/ datagram, callback) {
-    var that = this;
-
-    function cb(err) {
-        if (that.connection.debug)
-            console.log('udp sent, err[' + (err ? err.toString() : 'no_err') + ']');
-        callback && callback(err);
-    }
-
-    this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host, cb)
-}
-
-/*
- WTF? Why we send 4 times?
- */
-KnxSenderTunneling.prototype.SendData = function (/*buffer*/datagram, callback) {
-    var that = this;
-
-    function cb(err) {
-        if (that.connection.debug)
-            console.log('udp sent, err[' + (err ? err.toString() : 'no_err') + ']');
-        callback && callback(err);
-    }
-
-    this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host, cb);
-    //this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host, callback);
-    //this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host, callback);
-    //this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host, callback);
-}
 
 KnxSenderTunneling.prototype.SendTunnelingAck = function (sequenceNumber) {
     // HEADER
@@ -61,7 +27,10 @@ KnxSenderTunneling.prototype.SendTunnelingAck = function (sequenceNumber) {
     datagram[8] = sequenceNumber;
     datagram[9] = 0x00;
 
-    this._udpClient.send(datagram, 0, datagram.length, this._remoteEndpoint.port, this._remoteEndpoint.host);
+    this.connection.udpClient.send(
+			datagram, 0, datagram.length,
+			this.connection.remoteEndpoint.port,
+			this.connection.remoteEndpoint.host);
 }
 
 KnxSenderTunneling.prototype.CreateActionDatagram = function (/*string*/ destinationAddress, /*buffer*/ data) {
@@ -105,7 +74,6 @@ KnxSenderTunneling.prototype.CreateRequestStatusDatagram = function (/*string*/ 
         datagram[3] = 0x20;
         datagram[4] = 0x00;
         datagram[5] = 0x15;
-
         datagram[6] = 0x04;
         datagram[7] = this.connection.ChannelId;
         datagram[8] = this.connection.GenerateSequenceNumber();

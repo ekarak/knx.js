@@ -1,8 +1,61 @@
 /**
  * Created by aborovsky on 26.08.2015.
+ * refactored by ekarakou
  */
 function KnxReceiver(/*KnxConnection*/ connection) {
+	if (connection.debug) console.log('new KnxReceiver');
     this.connection = connection;
+		this._rxSequenceNumber = null;
+}
+
+KnxReceiver.prototype.Start = function (callback) {
+	if (this.connection.debug) console.log('KnxReceiverTunneling.prototype.Start');
+  var self = this;
+  this.socketReceiveLstnr = function (msg, rinfo) {
+		if (self.connection.debug) console.log('KnxReceiverTunneling.socketReceiveLstnr');
+      try {
+				var datagram = new KnxDatagram(msg);
+				self.ProcessDatagram(datagram);
+      } catch (e) {
+          console.error('Error processing KNX incoming datagram[' + msg.toString('hex') + '], cause: ' + e.toLocaleString());
+      }
+  }
+	this.connection.BindSocket(callback);
+  this.connection.udpClient.on('message', this.socketReceiveLstnr);
+}
+
+KnxReceiver.prototype.Stop = function () {
+    this.connection.udpClient.removeListener('message', this.socketReceiveLstnr);
+}
+
+KnxReceiver.prototype.ProcessDatagram = function (datagram) {
+    if (this.connection.debug)
+        console.log('ProcessDatagram datagram[%s]', datagram.toString('hex'));
+    try {
+        switch (datagram.serviceType) {
+            case KnxHelper.SERVICE_TYPE.CONNECT_RESPONSE:
+                this.ProcessConnectResponse(datagram);
+                break;
+            case KnxHelper.SERVICE_TYPE.CONNECTIONSTATE_RESPONSE:
+                this.ProcessConnectionStateResponse(datagram);
+                break;
+            case KnxHelper.SERVICE_TYPE.TUNNELLING_ACK:
+                this.ProcessTunnelingAck(datagram);
+                break;
+            case KnxHelper.SERVICE_TYPE.DISCONNECT_REQUEST:
+                this.ProcessDisconnectRequest(datagram);
+                break;
+            case KnxHelper.SERVICE_TYPE.TUNNELLING_REQUEST:
+                this.ProcessDatagramHeaders(datagram);
+                break;
+            default:
+                console.log('Unknown serviceType of datagram[%s]', datagram.toString('hex'));
+                break;
+        }
+    }
+    catch (e) {
+        console.error('Error processing datagram[' + datagram.toString('hex') + '] inside of KnxReceiverTunneling.prototype.ProcessDatagram, cause: ' + e.toLocaleString());
+    }
 }
 
 KnxReceiver.prototype.ProcessCEMI = function (/*KnxDatagram*/ datagram, /*buffer*/ cemi) {

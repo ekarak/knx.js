@@ -1,42 +1,58 @@
 /**
  * Created by aborovsky on 24.08.2015.
+ * refactored by ekarakou
  */
-
-var EventEmitter = require('events').EventEmitter;
+var os = require('os');
 var util = require('util');
+var dgram = require('dgram');
+var EventEmitter = require('events').EventEmitter;
 var InvalidKnxDataException = require('./InvalidKnxDataException');
+var ConnectionErrorException = require('./ConnectionErrorException');
 
-function isInt(n) {
-    return Number(n) === n && n % 1 === 0;
+var CONNECT_TIMEOUT = 5000;
+
+// an array of all available IPv4 addresses
+var localAddresses = [];
+var interfaces = os.networkInterfaces();
+for (var k in interfaces) {
+    for (var k2 in interfaces[k]) {
+        var intf = interfaces[k][k2];
+        if (intf.family === 'IPv4' && !intf.internal) {
+            localAddresses.push(intf.address);
+        }
+    }
 }
 
-function isFloat(n) {
-    return n === Number(n) && n % 1 !== 0;
-}
-
-function KnxConnection(host, port) {
+/*
+*
+*/
+function KnxConnection(addr, port, intf) {
 
     KnxConnection.super_.call(this);
-
+		//
+		this.localAddress = null;
+		if (localAddresses.length == 0) {
+			throw "No valid IPv4 interfaces detected";
+		} else if (localAddresses.length == 1) {
+			console.log("Using %s as local IP for KNX traffic", localAddresses[0]);
+			this.localAddress = localAddresses[0];
+		} else {
+			if (intf) {
+				for (var k2 in interfaces[intf]) {
+						var intf = interfaces[k][k2];
+						if (intf.family === 'IPv4' && !intf.internal) {
+							console.log("Using %s as local IP for KNX traffic", intf.address);
+							this.localAddress = intf.address;
+						}
+				}
+			} else {
+				throw "You must supply a valid network interface for KNX traffic";
+			}
+		}
+		this.udpClient = null;
     this.ClassName = 'KnxConnection';
-    this.RemoteEndpoint = {
-        host: host,
-        port: port,
-        toBytes: function () {
-            if (!this.host || this.host === '')
-                throw 'Cannot proceed toString for endPoint with empy host'
-            if (this.host.indexOf('.') === -1 || this.host.split('.').length < 4)
-                throw 'Cannot proceed toString for endPoint with host[' + this.host + '], it should contain ip address'
-            var result = new Buffer(4);
-            var arr = this.host.split('.');
-            result[0] = parseInt(arr[0]) & 255;
-            result[1] = parseInt(arr[1]) & 255;
-            result[2] = parseInt(arr[2]) & 255;
-            result[3] = parseInt(arr[3]) & 255;
-        }
-    };
+    this.remoteEndpoint = { addr: addr, port: port };
     this.connected = false;
-
     this.ActionMessageCode = 0x00;
     this.ThreeLevelGroupAddressing = true;
 }
@@ -84,7 +100,7 @@ KnxConnection.prototype.Action = function (address, data, callback) {
             case 'boolean':
                 buf = new Buffer(1);
                 buf.writeIntLE(data ? 1 : 0);
-                break
+                break;
             case 'number':
                 //if integer
                 if (isInt(data)) {
@@ -107,10 +123,10 @@ KnxConnection.prototype.Action = function (address, data, callback) {
                 }
                 else
                     throw new InvalidKnxDataException(data.toString());
-                break
+                break;
             case 'string':
                 buf = new Buffer(data.toString());
-                break
+                break;
         }
         data = buf;
     }
@@ -154,6 +170,252 @@ KnxConnection.prototype.FromDataPoint = function (type, /*buffer*/data) {
 /// <returns></returns>
 KnxConnection.prototype.ToDataPoint = function (type, value) {
     return DataPointTranslator.Instance.ToDataPoint(type, value);
+}
+
+KnxConnection.prototype.GenerateSequenceNumber = function () {
+    return this._sequenceNumber++;
+}
+
+KnxConnection.prototype.RevertSingleSequenceNumber = function () {
+    this._sequenceNumber--;
+}
+
+KnxConnection.prototype.ResetSequenceNumber = function () {
+    this._sequenceNumber = 0x00;
+}
+
+// <summary>
+///     Start the connection
+/// </summary>
+KnxConnection.prototype.Connect = function (callback) {
+    var self = this;
+		if (this.debug) console.log("connecting...");
+
+    function clearReconnectTimeout() {
+        if (self.reConnectTimeout) {
+            clearTimeout(self.reConnectTimeout);
+            delete self.reConnectTimeout;
+        }
+    }
+
+    function clearConnectTimeout() {
+        if (self.connectTimeout) {
+            clearTimeout(self.connectTimeout);
+            delete self.connectTimeout;
+        }
+    }
+
+    if (this.connected && this.udpClient) {
+        if (typeof callback === 'function') callback();
+        return true;
+    }
+
+    this.connectTimeout = setTimeout(function () {
+        self.removeListener('connected', clearConnectTimeout);
+        self.Disconnect(function () {
+            if (self.debug)
+                console.log('Error connecting: timeout');
+            if (typeof callback === 'function') callback({
+							msg: 'Error connecting: timeout', reason: 'CONNECTTIMEOUT'
+						});
+            clearReconnectTimeout();
+            this.reConnectTimeout = setTimeout(function () {
+                if (self.debug)
+                    console.log('reconnecting');
+                self.Connect(callback);
+            }, 3 * CONNECT_TIMEOUT);
+        });
+    }, CONNECT_TIMEOUT);
+    this.once('connected', clearConnectTimeout);
+    if (callback) {
+        this.removeListener('connected', callback);
+        this.once('connected', callback);
+    }
+    // try {
+        if (this.udpClient != null) {
+            try {
+                this.udpClient.close();
+                //this.udpClient.Client.Dispose();
+            }
+            catch (e) {
+                // ignore
+            }
+        }
+        this.udpClient = dgram.createSocket("udp4");
+    //} catch (e) {
+      //  throw new ConnectionErrorException(e);
+    //}
+
+		this.InitialiseSenderReceiver();
+		if (self.debug) console.log("initialised sender and receiver...");
+
+    new Promise(function (fulfill, reject) {
+			if (self.debug) console.log("Starting receiver...");
+        self.knxReceiver.Start(fulfill);
+    	})
+      .then(function () {
+				if (self.debug) console.log("InitializeStateRequest...");
+          self.InitializeStateRequest();
+      })
+      .then(function () {
+				if (self.debug) console.log("ConnectRequest...");
+          self.ConnectRequest();
+      })
+      .then(function () {
+          self.emit('connect');
+          self.emit('connecting');
+      });
+}
+
+/// <summary>
+///     Stop the connection
+/// </summary>
+KnxConnection.prototype.Disconnect = function (callback) {
+    var self = this;
+		if (self.debug) console.log("Disconnect...");
+    if (callback)
+        self.once('disconnect', callback);
+
+    try {
+        this.TerminateStateRequest();
+        new Promise(function (fulfill, reject) {
+            self.DisconnectRequest(fulfill);
+        })
+            .then(function () {
+                self.knxReceiver.Stop();
+                self.udpClient.close();
+                self.connected = false;
+                self.emit('close');
+                self.emit('disconnect');
+                self.emit('disconnected');
+            })
+
+    }
+    catch (e) {
+        self.emit('disconnect', e);
+    }
+
+}
+
+KnxConnection.prototype.InitializeStateRequest = function () {
+    var self = this;
+    this._stateRequestTimer = setInterval(function () {
+        timeout(function (fulfill) {
+            self.removeListener('alive', fulfill);
+            self.StateRequest(function (err) {
+                if (!err)
+                    self.once('alive', function () {
+                        fulfill();
+                    });
+            });
+        }, 2 * CONNECT_TIMEOUT, function () {
+            if (self.debug)
+                console.log('connection stale, so disconnect and then try to reconnect again');
+            new Promise(function (fulfill) {
+                self.Disconnect(fulfill);
+            }).then(function () {
+                  self.Connect();
+            });
+        });
+    }, 60000); // same time as ETS with group monitor open
+}
+
+KnxConnection.prototype.TerminateStateRequest = function () {
+    if (this._stateRequestTimer == null)
+        return;
+    clearTimeout(this._stateRequestTimer);
+}
+
+// given a buffer and an offset, write out the local endpoint IPv4 address
+KnxConnection.prototype.appendLocalAddressAndPort = function (buf, offset) {
+	if (!this.localAddress || this.localAddress === '' || this.localAddress.indexOf('.') === -1 )
+		throw 'Need valid IPv4 address for local endpoint';
+
+	var result = new Buffer(4);
+	var aa = this.localAddress.split('.');
+	for (i = 0; i <= 3; i++) {
+		buf[offset+i] = parseInt(aa[i]) & 255;
+	}
+	var localPort = this.udpClient.address().port;
+	buf[offset + 4] = (localPort >> 8) & 255;
+	buf[offset + 5] = localPort & 255;
+};
+
+KnxConnection.prototype.ConnectRequest = function (callback) {
+    // HEADER
+		if (this.debug) console.log("ConnectRequest: init");
+    var datagram = new Buffer(26);
+    datagram[0] = 0x06;
+    datagram[1] = 0x10;
+    datagram[2] = 0x02;
+    datagram[3] = 0x05;
+    datagram[4] = 0x00;
+    datagram[5] = 0x1A;
+    datagram[6] = 0x08;
+    datagram[7] = 0x01;
+		this.appendLocalAddressAndPort(datagram, 8);
+    datagram[14] = 0x08;
+    datagram[15] = 0x01;
+		this.appendLocalAddressAndPort(datagram, 16);
+    datagram[22] = 0x04;
+    datagram[23] = 0x04;
+    datagram[24] = 0x02;
+    datagram[25] = 0x00;
+    try {
+        this.knxSender.SendDataSingle(datagram, callback);
+    }
+    catch (e) {
+        if (typeof callback === 'function') callback();
+    }
+}
+
+KnxConnection.prototype.StateRequest = function (callback) {
+    // HEADER
+    var datagram = new Buffer(16);
+    datagram[0] = 0x06;
+    datagram[1] = 0x10;
+    datagram[2] = 0x02;
+    datagram[3] = 0x07;
+    datagram[4] = 0x00;
+    datagram[5] = 0x10;
+    datagram[6] = this.ChannelId;
+    datagram[7] = 0x00;
+    datagram[8] = 0x08;
+    datagram[9] = 0x01;
+		this.appendLocalAddressAndPort(datagram, 10);
+    try {
+        this.knxSender.SendData(datagram, callback);
+    }
+    catch (e) {
+        callback(e)
+    }
+}
+
+KnxConnection.prototype.DisconnectRequest = function (callback) {
+    if(!this.connected) {
+        callback && callback();
+        return false;
+    }
+    // HEADER
+    var datagram = new Buffer(16);
+    datagram[0] = 0x06;
+    datagram[1] = 0x10;
+    datagram[2] = 0x02;
+    datagram[3] = 0x09;
+    datagram[4] = 0x00;
+    datagram[5] = 0x10;
+    datagram[6] = this.ChannelId;
+    datagram[7] = 0x00;
+    datagram[8] = 0x08;
+    datagram[9] = 0x01;
+		this.appendLocalAddressAndPort(datagram, 10);
+
+    try {
+        this.knxSender.SendData(datagram, callback);
+    }
+    catch (e) {
+        callback(e)
+    }
 }
 
 module.exports = KnxConnection;

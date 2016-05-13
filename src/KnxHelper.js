@@ -297,44 +297,6 @@ KnxHelper.WriteData = function (/*buffer*/ datagram, /*buffer*/ data, dataStart)
     }
 }
 
-var SERVICE_TYPE =
-{
-    //0x0201
-    SEARCH_REQUEST: 0x0201,
-    //0x0202
-    SEARCH_RESPONSE: 0x0202,
-    //0x0203
-    DESCRIPTION_REQUEST: 0x0203,
-    //0x0204
-    DESCRIPTION_RESPONSE: 0x0204,
-    //0x0205
-    CONNECT_REQUEST: 0x0205,
-    //0x0206
-    CONNECT_RESPONSE: 0x0206,
-    //0x0207
-    CONNECTIONSTATE_REQUEST: 0x0207,
-    //0x0208
-    CONNECTIONSTATE_RESPONSE: 0x0208,
-    //0x0209
-    DISCONNECT_REQUEST: 0x0208,
-    //0x020A
-    DISCONNECT_RESPONSE: 0x020a,
-    //0x0310
-    DEVICE_CONFIGURATION_REQUEST: 0x0310,
-    //0x0311
-    DEVICE_CONFIGURATION_ACK: 0x0311,
-    //0x0420
-    TUNNELLING_REQUEST: 0x0420,
-    //0x0421
-    TUNNELLING_ACK: 0x0421,
-    //0x0530
-    ROUTING_INDICATION: 0x0530,
-    //0x0531
-    ROUTING_LOST_MESSAGE: 0x0531,
-    // UNKNOWN
-    UNKNOWN: -1
-}
-KnxHelper.SERVICE_TYPE = SERVICE_TYPE;
 
 KnxHelper.GetServiceType = KnxHelper.SERVICE_TYPE.GetServiceType = function (/*buffer*/ datagram) {
     switch (datagram[2]) {

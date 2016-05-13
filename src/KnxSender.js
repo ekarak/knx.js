@@ -1,5 +1,6 @@
 /**
  * Created by aborovsky on 25.08.2015.
+ * refactored by ekarakou
  */
 function KnxSender(/*KnxConnection*/ connection) {
     this.connection = connection;
@@ -28,7 +29,7 @@ KnxSender.prototype.CreateActionDatagramCommon = function (destinationAddress, /
     // |  Msg   |Add.Info| Ctrl 1 | Ctrl 2 | Source Address | Dest. Address  |  Data  |      APDU      |
     // | Code   | Length |        |        |                |                | Length |                |
     // +--------+--------+--------+--------+----------------+----------------+--------+----------------+
-    59//   1 byte   1 byte   1 byte   1 byte      2 bytes          2 bytes       1 byte      2 bytes
+    //   1 byte   1 byte   1 byte   1 byte      2 bytes          2 bytes       1 byte      2 bytes
     //
     //  Message Code    = 0x11 - a L_Data.req primitive
     //      COMMON EMI MESSAGE CODES FOR DATA LINK LAYER PRIMITIVES
@@ -121,5 +122,24 @@ KnxSender.prototype.CreateRequestStatusDatagramCommon = function (destinationAdd
 
     return datagram;
 }
+
+KnxSender.prototype.SendDataSingle = function (/*buffer*/ datagram, callback) {
+    var self = this;
+		if (self.connection.debug)
+			console.log('KnxSender.prototype.SendDataSingle: %d bytes', datagram.length);
+
+    function cb(err) {
+        if (self.connection.debug)
+            console.log('udp sent, err[' + (err ? err.toString() : 'no_err') + ']');
+        if (typeof callback === 'function') callback(err);
+    }
+
+    this.connection.udpClient.send(
+			datagram, 0, datagram.length,
+			this.connection.remoteEndpoint.port, this.connection.remoteEndpoint.addr,
+			cb);
+}
+
+KnxSender.prototype.SendData = KnxSender.prototype.SendDataSingle;
 
 module.exports = KnxSender;

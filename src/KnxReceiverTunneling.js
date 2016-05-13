@@ -1,80 +1,32 @@
 /**
  * Created by aborovsky on 24.08.2015.
+ * refactored by ekarakou
  */
 var util = require('util');
 var KnxDatagram = require('./KnxDatagram');
 var KnxReceiver = require('./KnxReceiver');
 
-function KnxReceiverTunneling(/*KnxConnection*/ connection, /*UdpClient*/ udpClient, /*IPEndPoint*/ localEndpoint) {
-    KnxReceiverTunneling.super_.call(this, connection, udpClient, localEndpoint);
-    this.connection = connection;
-    this._udpClient = udpClient;
-    this._localEndpoint = localEndpoint;
-    this._rxSequenceNumber = null;
+function KnxReceiverTunneling(/*KnxConnection*/ connection) {
+	if (connection.debug) console.log('new KnxReceiverTunneling');
+    KnxReceiverTunneling.super_.call(this, connection);
 }
 util.inherits(KnxReceiverTunneling, KnxReceiver);
 
-KnxReceiverTunneling.prototype.SetClient = function (/*UdpClient*/ client) {
-    this._udpClient = client;
-}
-KnxReceiverTunneling.prototype.Start = function (callback) {
-    var that = this;
-    this.socketReceiveLstnr = function (msg, rinfo) {
-        try {
-            that.ProcessDatagram(msg);
-        } catch (e) {
-            console.error('Error processing KNX incoming datagram[' + msg.toString('hex') + '], cause: ' + e.toLocaleString());
-        }
-    }
-    this._udpClient.on('message', this.socketReceiveLstnr);
-    this._udpClient.bind(this._localEndpoint.port, callback);
-}
-KnxReceiverTunneling.prototype.Stop = function () {
-    this._udpClient.removeListener('message', this.socketReceiveLstnr);
-}
-KnxReceiverTunneling.prototype.ProcessDatagram = function (/*buffer*/ datagram) {
-    if (this.connection.debug)
-        console.log('ProcessDatagram datagram[%s]', datagram.toString('hex'));
-    try {
-        switch (KnxHelper.GetServiceType(datagram)) {
-            case KnxHelper.SERVICE_TYPE.CONNECT_RESPONSE:
-                this.ProcessConnectResponse(datagram);
-                break;
-            case KnxHelper.SERVICE_TYPE.CONNECTIONSTATE_RESPONSE:
-                this.ProcessConnectionStateResponse(datagram);
-                break;
-            case KnxHelper.SERVICE_TYPE.TUNNELLING_ACK:
-                this.ProcessTunnelingAck(datagram);
-                break;
-            case KnxHelper.SERVICE_TYPE.DISCONNECT_REQUEST:
-                this.ProcessDisconnectRequest(datagram);
-                break;
-            case KnxHelper.SERVICE_TYPE.TUNNELLING_REQUEST:
-                this.ProcessDatagramHeaders(datagram);
-                break;
-            default:
-                console.log('Unknown serviceType of datagram[%s]', datagram.toString('hex'));
-                break;
-        }
-    }
-    catch (e) {
-        console.error('Error processing datagram[' + datagram.toString('hex') + '] inside of KnxReceiverTunneling.prototype.ProcessDatagram, cause: ' + e.toLocaleString());
-    }
-}
+//		.word8   ( 'channel_id' )
 
-KnxReceiverTunneling.prototype.ProcessDatagramHeaders = function (/*buffer*/ datagram) {
-    // HEADER
-    // TODO: Might be interesting to take out these magic numbers for the datagram indices
+KnxReceiverTunneling.prototype.ProcessDatagramHeaders = function (/*KnxDatagram*/ datagram) {
+/*
     var service_type = new Buffer(2);
     service_type[0] = datagram[2];
     service_type[1] = datagram[3];
+
     var knxDatagram = new KnxDatagram({
         header_length: datagram[0],
         protocol_version: datagram[1],
         service_type: service_type,
         total_length: datagram[4] + datagram[5]
     });
-
+*/
     var channelId = datagram[7];
     if (channelId != this.connection.ChannelId)
         return;
@@ -103,7 +55,7 @@ KnxReceiverTunneling.prototype.ProcessDisconnectRequest = function (/*buffer*/ d
 
     this.stop();
     this.connection.emit('close');
-    this._udpClient.close();
+    this.udpClient.close();
 }
 
 /*
