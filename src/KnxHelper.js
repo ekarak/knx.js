@@ -297,8 +297,7 @@ KnxHelper.WriteData = function (/*buffer*/ datagram, /*buffer*/ data, dataStart)
     }
 }
 
-
-KnxHelper.GetServiceType = KnxHelper.SERVICE_TYPE.GetServiceType = function (/*buffer*/ datagram) {
+KnxHelper.GetServiceType = function (/*buffer*/ datagram) {
     switch (datagram[2]) {
         case (0x02):
         {
