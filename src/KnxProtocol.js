@@ -4,6 +4,7 @@ var knxnetprotocol = new BinaryProtocol();
 
 knxnetprotocol.define('IPv4Endpoint', {
   read: function (propertyName) {
+		console.log('reading IPv4Endpoint');
     this.pushStack({ addr: null, port: null}).
     	UInt32BE('addr').UInt16BE('port').
     	popStack(propertyName, function (data) {
@@ -11,6 +12,7 @@ knxnetprotocol.define('IPv4Endpoint', {
      	});
    	},
   write: function (value) {
+		console.log('writing IPv4Endpoint');
     var arr = value.split(':');
     var ip = arr[0].split('.');
     for (i = 0; i <= 3; i++) this.Int8(parseInt(ip[i]));
@@ -18,6 +20,7 @@ knxnetprotocol.define('IPv4Endpoint', {
   }
 });
 
+/* helper function to print enum keys */
 function keyText(map, value) {
   for (var key in map) {
     if (map[key] == value) return key;
@@ -41,36 +44,81 @@ var CONNECTION_TYPE = {
   DEVICE_MGMT_CONNECTION: 0x03,
   TUNNEL_CONNECTION: 0x04
 };
+var KNX_LAYER = {
+	LINK_LAYER: 0x02,
+	RAW_LAYER: 0x03,
+	BUSMONITOR_LAYER: 0x80
+}
+// CRI: connection request/response
 knxnetprotocol.define('CRI', {
   read: function (propertyName) {
     this
-    .pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0, data:null}) // allocate a new object to read the data into.
+    .pushStack({ header_length: 0, connection_type: null, total_length: null, data: null}) //
     .Int8    ('header_length')
     .Int8    ('connection_type')
     .tap(function (hdr) {
+			console.log('readi CRI: %j', hdr);
       switch (hdr.connection_type) {
         case CONNECTION_TYPE.DEVICE_MGMT_CONNECTION: break; // TODO
-        case CONNECTION_TYPE.DEVICE_MGMT_CONNECTION: break; // TODO
+        case CONNECTION_TYPE.TUNNEL_CONNECTION:
+					console.log("Tunnel connection");
+					break; // TODO
         default: throw "Unsupported connection type: " + hdr.connection_type;
       }
     })
     .popStack(propertyName, function (data) {
+			console.log('read CRI: '+JSON.stringify(data));
       // pop the interim value off the stack and insert the real value into `propertyName`
-      return data.value;
+      return data
     });
   },
   write: function (value) {
-    if (value === null) {
-      this.Int32BE(-1); // a length of -1 indicates a null value.
-    }
-    else {
-      // value is a buffer
-      this
-      .Int32BE(value.length) // write the buffer length
-      .raw(value); // write the raw buffer
-    }
+		console.log('writing CRI');
+			// TODO
   }
 });
+
+// connection state response/request
+knxnetprotocol.define('ConnState', {
+	read: function (propertyName) {
+		this.pushStack({	channel_id: null, sequence_num: null })
+		.Int8('channel_id')
+		.Int8('sequence_num')
+		.popStack(propertyName, function (data) {
+			console.log('read ConnState: %j', data);
+			return data;
+		});
+	},
+	write: function (value) {
+		console.log('writing ConnState');
+		// TODO
+	}
+});
+
+// connection state response/request
+knxnetprotocol.define('ConnState2', {
+	read: function (propertyName) {
+		this.pushStack({ channel_id: null, status: null })
+		.Int8('channel_id')
+		.Int8('status')
+		.tap(function (hdr) {
+			console.log('reading ConnState2: %j', hdr);
+			switch (hdr.status) {
+				case 0x00:
+					break;
+				default: throw "Connection State status: " + hdr.status;
+			}
+		})
+		.popStack(propertyName, function (data) {
+			return data;
+		});
+	},
+	write: function (value) {
+		console.log('writing ConnState');
+		// TODO
+	}
+});
+
 
 /* Connection HPAI */
 //   creq[6]     =  /* Host Protocol Address Information (HPAI) Lenght */
@@ -91,18 +139,18 @@ var PROTOCOL_TYPE = {
 };
 knxnetprotocol.define('HPAI', {
   read: function (propertyName) {
-    this
-    .pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0})
+    this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0})
     .Int8('header_length')
     .Int8('protocol_type')
     .IPv4Endpoint('tunnelEndpoint')
     .tap(function (hdr) {
+			console.log('read HPAI: %j', hdr);
       if (hdr.header_length < hdr.length)
         throw "Incomplete KNXNet HPAI header";
-      console.log("KNXNetHeader: proto = %s", keyText(PROTOCOL_TYPE, data.protocol_type));
-      switch (data.service_type) {
-        case PROTOCOL_TYPE.IPV4_TCP:
-          throw "TCP is unsupported";
+      console.log("KNXNet HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
+      switch (hdr.service_type) {
+        case PROTOCOL_TYPE.IPV4_TCP:  throw "TCP is unsupported";
+				default:
       }
     })
     .popStack(propertyName, function (data) {
@@ -110,157 +158,11 @@ knxnetprotocol.define('HPAI', {
     });
   },
   write: function (value) {
-    if (value === null) {
-      this.Int32BE(-1); // a length of -1 indicates a null value.
-    }
-    else {
-      // value is a buffer
-      this
-      .Int32BE(value.length) // write the buffer length
-      .raw(value); // write the raw buffer
-    }
+			// TODO
   }
 });
 
-
-/* header */
-//creq[0] = 0x06;                     /* 06 - Header Length */
-//creq[1] = 0x10;                     /* 10 - KNXnet version (1.0) */
-//creq[2] = 0x02;                     /* 02 - hi-byte Service type descriptor (CONNECTION_REQUEST) */
-//creq[3] = 0x05;                     /* 05 - lo-byte Service type descriptor (CONNECTION_REQUEST) */
-//creq[4] = 0x00;                     /* 00 - hi-byte total length */
-//creq[5] = 0x1A;                     /* 1A - lo-byte total lengt 26 bytes */
-// ==> 6 (SIX) bytes
-var SERVICE_TYPE = {
-    SEARCH_REQUEST: 0x0201,
-    SEARCH_RESPONSE: 0x0202,
-    DESCRIPTION_REQUEST: 0x0203,
-    DESCRIPTION_RESPONSE: 0x0204,
-    CONNECT_REQUEST: 0x0205,
-    CONNECT_RESPONSE: 0x0206,
-    CONNECTIONSTATE_REQUEST: 0x0207,
-    CONNECTIONSTATE_RESPONSE: 0x0208,
-    DISCONNECT_REQUEST: 0x0208,
-    DISCONNECT_RESPONSE: 0x020a,
-    DEVICE_CONFIGURATION_REQUEST: 0x0310,
-    DEVICE_CONFIGURATION_ACK: 0x0311,
-    TUNNELLING_REQUEST: 0x0420,
-    TUNNELLING_ACK: 0x0421,
-    ROUTING_INDICATION: 0x0530,
-    ROUTING_LOST_MESSAGE: 0x0531,
-    UNKNOWN: -1
-};
-knxnetprotocol.define('KNXNetHeader', {
-  read: function (propertyName) {
-    this
-    .pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0, data:null}) // allocate a new object to read the data into.
-    .Int8    ('header_length')
-    .Int8    ('protocol_version')
-    .Int16BE('service_type')
-    .Int16BE('total_length')
-    .tap(function (hdr) {
-      if (hdr.header_length < hdr.length)
-        throw "Incomplete KNXNet header";
-      console.log("KNXNetHeader: serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
-      switch (hdr.service_type) {
-        case  SERVICE_TYPE.SEARCH_REQUEST: {
-          break;
-        }
-        case SERVICE_TYPE.CONNECTIONSTATE_REQUEST: {
-          break;
-        }
-        case SERVICE_TYPE.CONNECTIONSTATE_RESPONSE: {
-          this.raw('value', data.total_length);
-          break;
-        }
-        case SERVICE_TYPE.DESCRIPTION_RESPONSE: {
-          this.raw('value', data.total_length);
-          break;
-        }
-      }
-      this.raw('data', hdr.total_length);
-      this.HPAI('data');
-    })
-    .popStack(propertyName, function (data) {
-      // pop the interim value off the stack and insert the real value into `propertyName`
-      return data.value;
-    });
-  },
-  write: function (value) {
-    if (value === null) {
-      this.Int32BE(-1); // a length of -1 indicates a null value.
-    }
-    else {
-      // value is a buffer
-      this
-      .Int32BE(value.length) // write the buffer length
-      .raw(value); // write the raw buffer
-    }
-  }
-});
-
-
-
-
-// CEMI (start at position 6)
-// +--------+--------+--------+--------+----------------+----------------+--------+----------------+
-// |  Msg   |Add.Info| Ctrl 1 | Ctrl 2 | Source Address | Dest. Address  |  Data  |      APDU      |
-// | Code   | Length |        |        |                |                | Length |                |
-// +--------+--------+--------+--------+----------------+----------------+--------+----------------+
-//   1 byte   1 byte   1 byte   1 byte      2 bytes          2 bytes       1 byte      2 bytes
-//
-/*
-Control Field 1
-
-          Bit  |
-         ------+---------------------------------------------------------------
-           7   | Frame Type  - 0x0 for extended frame
-               |               0x1 for standard frame
-         ------+---------------------------------------------------------------
-           6   | Reserved
-               |
-         ------+---------------------------------------------------------------
-           5   | Repeat Flag - 0x0 repeat frame on medium in case of an error
-               |               0x1 do not repeat
-         ------+---------------------------------------------------------------
-           4   | System Broadcast - 0x0 system broadcast
-               |                    0x1 broadcast
-         ------+---------------------------------------------------------------
-           3   | Priority    - 0x0 system
-               |               0x1 normal
-         ------+               0x2 urgent
-           2   |               0x3 low
-               |
-         ------+---------------------------------------------------------------
-           1   | Acknowledge Request - 0x0 no ACK requested
-               | (L_Data.req)          0x1 ACK requested
-         ------+---------------------------------------------------------------
-           0   | Confirm      - 0x0 no error
-               | (L_Data.con) - 0x1 error
-         ------+---------------------------------------------------------------
-
-
-         Control Field 2
-
-          Bit  |
-         ------+---------------------------------------------------------------
-           7   | Destination Address Type - 0x0 individual address
-               |                          - 0x1 group address
-         ------+---------------------------------------------------------------
-          6-4  | Hop Count (0-7)
-         ------+---------------------------------------------------------------
-          3-0  | Extended Frame Format - 0x0 standard frame
-         ------+---------------------------------------------------------------
-
-parser.packet('knxnet_cemi',
-  'messageCode: b8,    \
-   additionalInfo: b8, \
-   b8{frameType: b1, rsvd1: b8, repeatFlag: b1, broadcast: b1, priority: b2, ackRequest: b1, confirm: b1},  \
-   b8{destAddrType: b1, hopCount: b3, extendedFrame: b4}, \
-   sourceAddress: b16, \
-   destAddress: b16,   \
-   dataLength: b8');
-*/
+/* ==================== APCI ====================== */
 //
 //  Message Code    = 0x11 - a L_Data.req primitive
 //      COMMON EMI MESSAGE CODES FOR DATA LINK LAYER PRIMITIVES
@@ -322,6 +224,207 @@ parser.packet('knxnet_apci',
    destinationAddress: b16             \
   ');
 */
+knxnetprotocol.define('APCI', {
+ read: function (propertyName) {
+		console.log('reading APCI');
+		this.pushStack({ tpci: null, ttl: null, ctrl: null, proto: null, csum: null, src_addr: null, dest_addr: null })
+		.UInt16BE('tpci').Int8('ttl').Int8('proto').UInt16BE('csum')
+		.UInt16BE('src_addr').UInt16BE('dest_addr')
+		.tap(function (hdr) {
+			// TODO: bitshifting for the two ctrl bytes
+			console.log('read APCI: %j', hdr);
+			return hdr;
+		})
+		.popStack(propertyName, function (data) {
+			return data;
+		});
+	},
+	write: function (value) {
+	 // TODO
+	}
+});
+
+/* ==================== CEMI ====================== */
+
+// CEMI (start at position 6)
+// +--------+--------+--------+--------+----------------+----------------+--------+----------------+
+// |  Msg   |Add.Info| Ctrl 1 | Ctrl 2 | Source Address | Dest. Address  |  Data  |      APDU      |
+// | Code   | Length |        |        |                |                | Length |                |
+// +--------+--------+--------+--------+----------------+----------------+--------+----------------+
+//   1 byte   1 byte   1 byte   1 byte      2 bytes          2 bytes       1 byte      2 bytes
+//
+/*
+Control Field 1
+
+          Bit  |
+         ------+---------------------------------------------------------------
+           7   | Frame Type  - 0x0 for extended frame
+               |               0x1 for standard frame
+         ------+---------------------------------------------------------------
+           6   | Reserved
+               |
+         ------+---------------------------------------------------------------
+           5   | Repeat Flag - 0x0 repeat frame on medium in case of an error
+               |               0x1 do not repeat
+         ------+---------------------------------------------------------------
+           4   | System Broadcast - 0x0 system broadcast
+               |                    0x1 broadcast
+         ------+---------------------------------------------------------------
+           3   | Priority    - 0x0 system
+               |               0x1 normal
+         ------+               0x2 urgent
+           2   |               0x3 low
+               |
+         ------+---------------------------------------------------------------
+           1   | Acknowledge Request - 0x0 no ACK requested
+               | (L_Data.req)          0x1 ACK requested
+         ------+---------------------------------------------------------------
+           0   | Confirm      - 0x0 no error
+               | (L_Data.con) - 0x1 error
+         ------+---------------------------------------------------------------
+
+
+         Control Field 2
+
+          Bit  |
+         ------+---------------------------------------------------------------
+           7   | Destination Address Type - 0x0 individual address
+               |                          - 0x1 group address
+         ------+---------------------------------------------------------------
+          6-4  | Hop Count (0-7)
+         ------+---------------------------------------------------------------
+          3-0  | Extended Frame Format - 0x0 standard frame
+         ------+---------------------------------------------------------------
+*/
+var FRAME_TYPE = {
+   EXTENDED: 0x00,
+   STANDARD: 0x01,
+};
+knxnetprotocol.define('CEMI', {
+ read: function (propertyName) {
+	 console.log('reading CEMI: %s', propertyName);
+		this.pushStack({ msgcode: 0, addtnl_info_len: -1, ctrl: null, src_addr: null, dest_addr: null, data_length: null, apdu: null })
+		.Int8('msgcode')
+		.Int8('addtnl_info_len')
+		.UInt16BE('ctrl')
+		.UInt16BE('src_addr')
+		.UInt16BE('dest_addr')
+		.Int8('data_length')
+		//.APCI('apdu')
+		.tap(function (hdr) {
+			console.log('??? %j ???', hdr);
+			return hdr;
+//      this.raw('data', hdr.total_length);
+//      this.HPAI('data');
+		})
+		.popStack(propertyName, function (data) {
+			//console.log('popStack CEMI: %j', data);
+			return data;
+		});
+	},
+	write: function (value) {
+	 // TODO
+	}
+});
+
+/*
+parser.packet('knxnet_cemi',
+  'messageCode: b8,    \
+   additionalInfo: b8, \
+   b8{frameType: b1, rsvd1: b8, repeatFlag: b1, broadcast: b1, priority: b2, ackRequest: b1, confirm: b1},  \
+   b8{destAddrType: b1, hopCount: b3, extendedFrame: b4}, \
+   sourceAddress: b16, \
+   destAddress: b16,   \
+   dataLength: b8');
+*/
+
+
+/* header */
+//creq[0] = 0x06;                     /* 06 - Header Length */
+//creq[1] = 0x10;                     /* 10 - KNXnet version (1.0) */
+//creq[2] = 0x02;                     /* 02 - hi-byte Service type descriptor (CONNECTION_REQUEST) */
+//creq[3] = 0x05;                     /* 05 - lo-byte Service type descriptor (CONNECTION_REQUEST) */
+//creq[4] = 0x00;                     /* 00 - hi-byte total length */
+//creq[5] = 0x1A;                     /* 1A - lo-byte total lengt 26 bytes */
+// ==> 6 (SIX) bytes
+var SERVICE_TYPE = {
+    SEARCH_REQUEST: 0x0201,
+    SEARCH_RESPONSE: 0x0202,
+    DESCRIPTION_REQUEST: 0x0203,
+    DESCRIPTION_RESPONSE: 0x0204,
+    CONNECT_REQUEST: 0x0205,
+    CONNECT_RESPONSE: 0x0206,
+    CONNECTIONSTATE_REQUEST: 0x0207,
+    CONNECTIONSTATE_RESPONSE: 0x0208,
+    DISCONNECT_REQUEST: 0x0208,
+    DISCONNECT_RESPONSE: 0x020a,
+    DEVICE_CONFIGURATION_REQUEST: 0x0310,
+    DEVICE_CONFIGURATION_ACK: 0x0311,
+    TUNNELLING_REQUEST: 0x0420,
+    TUNNELLING_ACK: 0x0421,
+    ROUTING_INDICATION: 0x0530,
+    ROUTING_LOST_MESSAGE: 0x0531,
+    UNKNOWN: -1
+};
+knxnetprotocol.define('KNXNetHeader', {
+  read: function (propertyName) {
+		console.log('reading KNXNetHeader');
+    this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0, payload: {} })
+    .Int8   ('header_length')
+    .Int8   ('protocol_version')
+    .Int16BE('service_type')
+    .Int16BE('total_length')
+    .tap(function (hdr) {
+      if (hdr.header_length < hdr.length)
+        throw "Incomplete KNXNet header";
+			console.log("offset %d ==> %s", this.offset, keyText(SERVICE_TYPE, hdr.service_type));
+      switch (hdr.service_type) {
+//        case SERVICE_TYPE.SEARCH_REQUEST:
+//				case SERVICE_TYPE.CONNECT_REQUEST:
+				case SERVICE_TYPE.CONNECT_RESPONSE: {
+					this.ConnState('connstate').collect(function (data) {
+						console.log("connect_response collect: %j", data);
+						return data;
+					});
+					break;
+				}
+        case SERVICE_TYPE.CONNECTIONSTATE_REQUEST: {
+          break;
+        }
+        case SERVICE_TYPE.CONNECTIONSTATE_RESPONSE: {
+          this.ConnState('conn_state');
+          break;
+        }
+        case SERVICE_TYPE.DESCRIPTION_RESPONSE: {
+          this.raw('value', hdr.total_length);
+          break;
+        }
+				case SERVICE_TYPE.TUNNELLING_REQUEST: {
+					this.ConnState('connstate').CEMI('cemi').collect(function (data) {
+						console.log("tunneling_response collect2: %j", data);
+						return data;
+					});
+					break;
+				}
+				default: {
+					console.log("KNXNetHeader: unhandled serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
+				}
+      }
+			console.log('+++ %j +++', hdr);
+//      this.raw('data', hdr.total_length);
+//      this.HPAI('data');
+    })
+    .popStack(propertyName, function (data) {
+			console.log('%%% %j %%%', data);
+      // pop the interim value off the stack and insert the real value into `propertyName`
+      return data;
+    });
+  },
+  write: function (value) {
+		// TODO
+  }
+});
+
 
 
 module.exports = knxnetprotocol;

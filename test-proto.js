@@ -26,8 +26,16 @@ knxnetprotocol.define('IPv4Endpoint', {
 //var r = kp.createReader(buffer);
 //r.KNXNetHeader('p');
 //console.log(JSON.stringify(r.next()));
+var dgrams = [
+  "061004200015040200002e00bce000000832010081",
+  "061004200016040201002900bce00000083b0200804a",
+"061002060014030008010a0c17350e5704040000"];
+for (var i=0; i< dgrams.length; i++) {
+	var buf = new Buffer(dgrams[i], 'hex');
+	console.log("\n==== %s ==== (%d bytes)", dgrams[i], buf.length);
+	var reader = knxnetprotocol.createReader(buf);
+	reader.KNXNetHeader('packet'+i);
+	console.log(reader.next());
+}
 
-var buf = new Buffer("061002060014030008010a0c17350e5704040000", 'hex');
-var reader = knxnetprotocol.createReader(buf);
-reader.KNXNetHeader('packet');
-console.log(reader.next());
+//061004200015 0402 00002e00bce000000832010081
