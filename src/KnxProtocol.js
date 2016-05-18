@@ -6,20 +6,21 @@ var knxnetprotocol = new BinaryProtocol();
 
 knxnetprotocol.define('IPv4Endpoint', {
   read: function (propertyName) {
-    console.log('reading IPv4Endpoint');
     this.pushStack({ addr: null, port: null})
       .UInt32BE('addr')
-      .UInt16BE('port').
-      popStack(propertyName, function (data) {
+      .UInt16BE('port')
+      .popStack(propertyName, function (data) {
         return ipv4.ntoa(data.addr) + ':' + data.port;
        });
      },
   write: function (value) {
-    console.log('writing IPv4Endpoint');
+    if (!(typeof value === 'string' && value.match(/\d*\.\d*\.\d*\.\d*:\d*/))) {
+      throw "Invalid IPv4 endpoint, please provide ipaddress:port";
+    }
     var arr = value.split(':');
-    var ip = arr[0].split('.');
-    for (i = 0; i <= 3; i++) this.Int8(parseInt(ip[i]));
-    this.Int16BE(arr[1]);
+    console.log("ipv4 write: %j", arr);
+    this.UInt32BE(ipv4.aton(arr[0]));
+    this.UInt16BE(arr[1]);
   }
 });
 
@@ -37,34 +38,35 @@ function keyText(map, value) {
 // creq[24] = 0x02;  /* KNX Layer (Tunnel Link Layer) */
 // creq[25] = 0x00;  /* Reserved */
 // ==> 4 bytes
+var CONNECTION_TYPE = {
+  DEVICE_MGMT_CONNECTION: 0x03,
+  TUNNEL_CONNECTION: 0x04
+};
 /** Tunneling on busmonitor layer, establishes a busmonitor tunnel to the KNX network.
 public static final int BUSMONITOR_LAYER = 0x80; */
 /** Tunneling on link layer, establishes a link layer tunnel to the KNX network.
 public static final int LINK_LAYER = 0x02; */
 /** Tunneling on raw layer, establishes a raw tunnel to the KNX network.
 public static final int RAW_LAYER = 0x04; */
-var CONNECTION_TYPE = {
-  DEVICE_MGMT_CONNECTION: 0x03,
-  TUNNEL_CONNECTION: 0x04
-};
 var KNX_LAYER = {
   LINK_LAYER: 0x02,
   RAW_LAYER: 0x03,
   BUSMONITOR_LAYER: 0x80
 }
+
 // CRI: connection request/response
 knxnetprotocol.define('CRI', {
   read: function (propertyName) {
     this
-    .pushStack({ header_length: 0, connection_type: null, total_length: null, data: null}) //
-    .Int8    ('header_length')
-    .Int8    ('connection_type')
+    .pushStack({ header_length: 0, connection_type: null, knx_layer: null}) //
+    .Int8  ('header_length')
+    .Int8  ('connection_type')
+    .Int8  ('knx_layer')
     .tap(function (hdr) {
-      console.log('readi CRI: %j', hdr);
       switch (hdr.connection_type) {
-        case CONNECTION_TYPE.DEVICE_MGMT_CONNECTION: break; // TODO
+        case CONNECTION_TYPE.DEVICE_MGMT_CONNECTION:
+          break; // TODO
         case CONNECTION_TYPE.TUNNEL_CONNECTION:
-          console.log("Tunnel connection");
           break; // TODO
         default: throw "Unsupported connection type: " + hdr.connection_type;
       }
@@ -76,8 +78,11 @@ knxnetprotocol.define('CRI', {
     });
   },
   write: function (value) {
-    console.log('writing CRI');
-      // TODO
+    this
+      .Int8  (value.header_length)
+      .Int8  (value.connection_type)
+      .Int8  (value.knx_layer);
+      // TODO?
   }
 });
 
@@ -93,8 +98,9 @@ knxnetprotocol.define('ConnState', {
     });
   },
   write: function (value) {
-    console.log('writing ConnState');
-    // TODO
+    this
+      .Int8(value.channel_id)
+      .Int8(value.seqnum);
   }
 });
 
@@ -120,7 +126,7 @@ knxnetprotocol.define('SeqState', {
     });
   },
   write: function (value) {
-    console.log('writing ConnState');
+    console.log('writing SeqState: %j', value);
     // TODO
   }
 });
@@ -145,7 +151,7 @@ var PROTOCOL_TYPE = {
 };
 knxnetprotocol.define('HPAI', {
   read: function (propertyName) {
-    this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0})
+    this.pushStack({ header_length: 0, protocol_type: null,  total_length: 0})
     .Int8('header_length')
     .Int8('protocol_type')
     .IPv4Endpoint('tunnelEndpoint')
@@ -153,7 +159,7 @@ knxnetprotocol.define('HPAI', {
       console.log('read HPAI: %j', hdr);
       if (hdr.header_length < hdr.length)
         throw "Incomplete KNXNet HPAI header";
-      console.log("KNXNet HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
+      console.log("     HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
       switch (hdr.service_type) {
         case PROTOCOL_TYPE.IPV4_TCP:  throw "TCP is unsupported";
         default:
@@ -164,7 +170,10 @@ knxnetprotocol.define('HPAI', {
     });
   },
   write: function (value) {
-      // TODO
+    this
+      .Int8(value.header_length)
+      .Int8(value.protocol_type)
+      .IPv4Endpoint(value.tunnelEndpoint);
   }
 });
 
@@ -251,7 +260,14 @@ knxnetprotocol.define('APCI', {
     });
   },
   write: function (value) {
-   // TODO
+   this
+    .UInt16BE(value.tpci)
+    .Int8(value.ttl)
+    .Int8(value.proto)
+    .UInt16BE(value.csum)
+    .UInt16BE(value.src_addr)
+    .UInt16BE(value.dest_addr)
+    .Uint8(value.apdu_length);
   }
 });
 
@@ -284,7 +300,7 @@ Control Field 1
            3   | Priority    - 0x0 system
                |               0x1 normal
          ------+               0x2 urgent
-           2   |               0x3 low
+           2   |       service_type: -1,        0x3 low
                |
          ------+---------------------------------------------------------------
            1   | Acknowledge Request - 0x0 no ACK requested
@@ -340,7 +356,6 @@ var ctrlStruct = new Parser()
 
 knxnetprotocol.define('CEMI', {
  read: function (propertyName) {
-   console.log('reading CEMI: %s', propertyName);
     this.pushStack({ msgcode: 0, addinfo_length: -1, ctrl: null, src_addr: null, dest_addr: null, apdu_length: null, tpdu: null, apdu: null })
     .Int8('msgcode')
     .Int8('addinfo_length')
@@ -357,8 +372,9 @@ knxnetprotocol.define('CEMI', {
         case MESSAGECODES["L_Data.ind"]: // received a data frame
         case MESSAGECODES["L_Data.con"]: // received a data frame
           this.raw('apdu', hdr.apdu_length);
-          console.log("*** L_Data.ind *** !!!!"); break;
-        default: throw "I  just wet my pants";
+          break;
+        default:
+          throw "Unhandled message code: "+keyText(MESSAGECODES, hdr.msgcode);
       }
       //console.log("cemi: apdu collect: %j", hdr);
       //console.log(KnxHelper.GetAddress(hdr.src_addr, '.', true));
@@ -370,7 +386,14 @@ knxnetprotocol.define('CEMI', {
     });
   },
   write: function (value) {
-   // TODO
+   this
+     .Int8(value.msgcode)
+     .Int8(value.addinfo_length)
+     .raw(value.ctrl, 2)
+     .UInt16BE(value.src_addr)
+     .UInt16BE(value.dest_addr)
+     .Int8(value.apdu_length)
+     .Int8(value.tpdu);
   }
 });
 
@@ -406,8 +429,12 @@ knxnetprotocol.define('KNXNetHeader', {
         throw "Incomplete KNXNet header";
       console.log("offset %d ==> %s", this.offset, keyText(SERVICE_TYPE, hdr.service_type));
       switch (hdr.service_type) {
-//        case SERVICE_TYPE.SEARCH_REQUEST:nbv
-//        case SERVICE_TYPE.CONNECT_REQUEST:
+//        case SERVICE_TYPE.SEARCH_REQUEST:
+        case SERVICE_TYPE.CONNECT_REQUEST: {
+          this.HPAI('hpai').HPAI('tunn').CRI('cri').collect(function (data) {
+            return data;
+          });
+        break; }
         case SERVICE_TYPE.CONNECT_RESPONSE: {
           this.ConnState('connstate').collect(function (data) {
             //console.log("connect_response collect: %j", data);
@@ -429,7 +456,6 @@ knxnetprotocol.define('KNXNetHeader', {
         // most common case:
         case SERVICE_TYPE.TUNNELLING_REQUEST: {
           this.SeqState('seqstate').CEMI('cemi').collect(function (data) {
-            //console.log("tunneling_response collect2: %j", data);
             return data;
           });
           break;
@@ -449,7 +475,46 @@ knxnetprotocol.define('KNXNetHeader', {
     });
   },
   write: function (value) {
-    // TODO
+    console.log("writing KnxHeader %j", value);
+    if (value === null) throw "cannot write null value"
+    else {
+      this
+      .Int8   (6)
+      .Int8   (0x10)
+      .Int16BE(value.service_type)
+      .Int16BE(value.total_length);
+      switch (value.service_type) {
+        case SERVICE_TYPE.SEARCH_REQUEST:
+        case SERVICE_TYPE.CONNECT_REQUEST: {
+          this.HPAI(value.hpai).HPAI(value.tunn).CRI(value.cri);
+          break;
+        }
+        case SERVICE_TYPE.CONNECT_RESPONSE: {
+          this.ConnState(value.connstate).
+          break;
+        }
+        case SERVICE_TYPE.CONNECTIONSTATE_REQUEST: {
+          // TODO
+          break;
+        }
+        case SERVICE_TYPE.CONNECTIONSTATE_RESPONSE: {
+          this.ConnState(value.conn_state);
+          break;
+        }
+        case SERVICE_TYPE.DESCRIPTION_RESPONSE: {
+          //this.raw('value', value.total_length);
+          break;
+        }
+        // most common case:
+        case SERVICE_TYPE.TUNNELLING_REQUEST: {
+          this.SeqState(value.seqstate).CEMI(value.cemi);
+          break;
+        }
+        default: {
+          console.log("KNXNetHeader: unhandled serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
+        }
+      }
+    }
   }
 });
 
