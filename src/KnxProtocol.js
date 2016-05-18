@@ -58,10 +58,11 @@ var KNX_LAYER = {
 knxnetprotocol.define('CRI', {
   read: function (propertyName) {
     this
-    .pushStack({ header_length: 0, connection_type: null, knx_layer: null}) //
+    .pushStack({ header_length: 0, connection_type: null, knx_layer: null, unused:null}) //
     .Int8  ('header_length')
     .Int8  ('connection_type')
     .Int8  ('knx_layer')
+    .Int8  ('unused')
     .tap(function (hdr) {
       switch (hdr.connection_type) {
         case CONNECTION_TYPE.DEVICE_MGMT_CONNECTION:
@@ -81,7 +82,8 @@ knxnetprotocol.define('CRI', {
     this
       .Int8  (value.header_length)
       .Int8  (value.connection_type)
-      .Int8  (value.knx_layer);
+      .Int8  (value.knx_layer)
+      .Int8  (value.unused);
       // TODO?
   }
 });
@@ -127,7 +129,11 @@ knxnetprotocol.define('SeqState', {
   },
   write: function (value) {
     console.log('writing SeqState: %j', value);
-    // TODO
+    this
+      .Int8(value.length)
+      .Int8(value.channel_id)
+      .Int8(value.seqnum)
+      .Int8(value.rsvd);
   }
 });
 
@@ -161,7 +167,8 @@ knxnetprotocol.define('HPAI', {
         throw "Incomplete KNXNet HPAI header";
       console.log("     HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
       switch (hdr.service_type) {
-        case PROTOCOL_TYPE.IPV4_TCP:  throw "TCP is unsupported";
+        case PROTOCOL_TYPE.IPV4_TCP:
+          throw "TCP is unsupported";
         default:
       }
     })
@@ -366,6 +373,7 @@ knxnetprotocol.define('CEMI', {
     .Int8('tpdu')
     .tap(function (hdr) {
       // parse 16bit control field
+      console.log(hdr.ctrl);
       hdr.ctrl = ctrlStruct.parse(hdr.ctrl);
       console.log("ctrl fields: %j", hdr.ctrl);
       switch(hdr.msgcode) {
@@ -386,14 +394,28 @@ knxnetprotocol.define('CEMI', {
     });
   },
   write: function (value) {
+    var ctrlField1 =
+      value.ctrl.frameType   * 0x80 +
+      value.ctrl.reserved    * 0x40 +
+      value.ctrl.repeat      * 0x20 +
+      value.ctrl.broadcast   * 0x10 +
+      value.ctrl.priority    * 0x04 +
+      value.ctrl.acknowledge * 0x02 +
+      value.ctrl.confirm;
+    var ctrlField2 =
+      value.ctrl.destAddrType* 0x80 +
+      value.ctrl.hopCount    * 0x10 +
+      value.ctrl.extendedFrame;
    this
      .Int8(value.msgcode)
      .Int8(value.addinfo_length)
-     .raw(value.ctrl, 2)
+     .UInt8(ctrlField1)
+     .UInt8(ctrlField2)
      .UInt16BE(value.src_addr)
      .UInt16BE(value.dest_addr)
      .Int8(value.apdu_length)
-     .Int8(value.tpdu);
+     .Int8(value.tpdu)
+     .raw(value.apdu, value.apdu_length);
   }
 });
 
@@ -419,7 +441,7 @@ var SERVICE_TYPE = {
 knxnetprotocol.define('KNXNetHeader', {
   read: function (propertyName) {
     console.log('reading KNXNetHeader');
-    this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0, payload: {} })
+    this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0})
     .Int8   ('header_length')
     .Int8   ('protocol_version')
     .Int16BE('service_type')
@@ -436,8 +458,7 @@ knxnetprotocol.define('KNXNetHeader', {
           });
         break; }
         case SERVICE_TYPE.CONNECT_RESPONSE: {
-          this.ConnState('connstate').collect(function (data) {
-            //console.log("connect_response collect: %j", data);
+          this.ConnState('connstate').HPAI('hpai').CRI('cri').collect(function (data) {
             return data;
           });
           break;
@@ -464,18 +485,13 @@ knxnetprotocol.define('KNXNetHeader', {
           console.log("KNXNetHeader: unhandled serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
         }
       }
-      console.log('+++ %j +++', hdr);
-//      this.raw('data', hdr.total_length);
-//      this.HPAI('data');
     })
     .popStack(propertyName, function (data) {
-      console.log('%%% popstack KnxHeader %%%');
-      // pop the interim value off the stack and insert the real value into `propertyName`
       return data;
     });
   },
   write: function (value) {
-    console.log("writing KnxHeader %j", value);
+    console.log("writing KnxHeader:", value);
     if (value === null) throw "cannot write null value"
     else {
       this
@@ -484,13 +500,13 @@ knxnetprotocol.define('KNXNetHeader', {
       .Int16BE(value.service_type)
       .Int16BE(value.total_length);
       switch (value.service_type) {
-        case SERVICE_TYPE.SEARCH_REQUEST:
+        //case SERVICE_TYPE.SEARCH_REQUEST:
         case SERVICE_TYPE.CONNECT_REQUEST: {
           this.HPAI(value.hpai).HPAI(value.tunn).CRI(value.cri);
           break;
         }
         case SERVICE_TYPE.CONNECT_RESPONSE: {
-          this.ConnState(value.connstate).
+          this.ConnState(value.connstate).HPAI(value.hpai).CRI(value.cri);
           break;
         }
         case SERVICE_TYPE.CONNECTIONSTATE_REQUEST: {
