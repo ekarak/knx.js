@@ -1,17 +1,13 @@
 var ipv4 = require('ipv4.js');
 var Parser = require('binary-parser').Parser;
-var KnxHelper = require('./KnxHelper.js');
+var KnxAddress = require('./KnxAddress');
+
 var BinaryProtocol = require('binary-protocol');
 var knxnetprotocol = new BinaryProtocol();
 
 // defaults
 knxnetprotocol.twoLevelAddressing = false;
 
-var ADDRESS_TYPE = knxnetprotocol.ADDRESS_TYPE = {
-  PHYSICAL: 0x00,
-  GROUP: 0x01
-};
-//
 var SERVICE_TYPE = knxnetprotocol.SERVICE_TYPE = {
     SEARCH_REQUEST:   0x0201,
     SEARCH_RESPONSE:  0x0202,
@@ -48,62 +44,6 @@ var KNX_LAYER = knxnetprotocol.KNX_LAYER = {
   BUSMONITOR_LAYER: 0x80 /** Tunneling on busmonitor layer, establishes a busmonitor tunnel to the KNX network.*/
 }
 
-var threeLevelPhysical = (new Parser()).bit4('l1').bit4('l2').uint8('l3');
-var threeLevelGroup    = (new Parser()).bit1('rsvd').bit4('l1').bit3('l2').uint8('l3');
-var twoLevel           = (new Parser()).bit1('rsvd').bit4('l1').bit11('l2');
-// convert address stored in two-byte buffer to string
-var AddrToString = knxnetprotocol.AddrToString = function (buf /*buffer*/, addrtype /*ADDRESS_TYPE*/) {
-  var group = (addrtype == ADDRESS_TYPE.GROUP) ;
-  var address = null;
-  //console.log('%j, type: %d, %j', buf, addrtype, knxnetprotocol.twoLevelAddressing);
-  if (!(typeof buf === 'object' && buf.constructor.name == 'Buffer' && buf.length == 2))
-    throw "not a buffer, or not a 2-byte address buffer"
-  if (group && knxnetprotocol.twoLevelAddressing) {
-    // 2 level group
-    var addr = twoLevel.parse(buf);
-    address = [addr.l1, addr.l2].join('/');
-  }  else {
-    // 3 level physical or group address
-    var sep  = (group ? '/' : '.');
-    var addr = (group ? threeLevelGroup : threeLevelPhysical).parse(buf);
-    address = [addr.l1, addr.l2, addr.l3].join(sep);
-  }
-  if (knxnetprotocol.debug) console.log('$$$ addr: %j', addr);
-  return address;
-}
-
-var StringToAddr = knxnetprotocol.StringToAddr = function (addr /*string*/, addrtype /*ADDRESS_TYPE*/) {
-  var group = (addrtype === ADDRESS_TYPE.GROUP) ;
-  var address = new Buffer(2);
-  var tokens  = addr.split((group ? '/' : '.'));
-  var hinibble = parseInt(tokens[0]);
-  var midnibble = parseInt(tokens[1]);
-  if (group && knxnetprotocol.twoLevelAddressing) {
-    // 2 level group address
-    if (hinibble < 0 || hinibble > 15)     throw "Invalid KNX 2-level main group";
-    if (midnibble < 0 || midnibble > 2047) throw "Invalid KNX 2-level sub group";
-    address.writeUInt16BE((hinibble << 11) + midnibble, 0);
-  } else {
-    var lonibble = parseInt(tokens[2]);
-    if (group) {
-      // 3 level group address
-      if (hinibble < 0  || hinibble > 15)  throw "Invalid KNX 3-level main group";
-      if (midnibble < 0 || midnibble > 7)  throw "Invalid KNX 3-level mid group";
-      if (lonibble < 0  || lonibble > 255) throw "Invalid KNX 3-level sub group";
-      address.writeUInt8((hinibble << 3) + midnibble, 0);
-      address.writeUInt8(lonibble ,1);
-    } else {
-      // 3 level physical address
-      if (hinibble < 0  || hinibble > 15)  throw "Invalid KNX area address";
-      if (midnibble < 0 || midnibble > 15) throw "Invalid KNX line address";
-      if (lonibble < 0  || lonibble > 255) throw "Invalid KNX device address";
-      address.writeUInt8((hinibble << 4) + midnibble, 0);
-      address.writeUInt8(lonibble, 1);
-    }
-    if (knxnetprotocol.debug) console.log('$$$ addr: %j', address);
-  }
-  return address;
-}
 //
 knxnetprotocol.define('IPv4Endpoint', {
   read: function (propertyName) {
@@ -127,7 +67,7 @@ knxnetprotocol.define('IPv4Endpoint', {
   }
 });
 
-/* TODO: move helper function to print enum keys */
+/* TODO helper function to print enum keys */
 function keyText(map, value) {
   for (var key in map) {
     if (map[key] == value) return key;
@@ -472,8 +412,8 @@ knxnetprotocol.define('CEMI', {
         case MESSAGECODES["L_Data.ind"]: // received a data frame
         case MESSAGECODES["L_Data.con"]: // received a data frame
           this.raw('apdu', hdr.apdu_length);
-          hdr.src_addr  = AddrToString(hdr.src_addr, ADDRESS_TYPE.PHYSICAL);
-          hdr.dest_addr = AddrToString(hdr.dest_addr, hdr.ctrl.destAddrType);
+          hdr.src_addr  = KnxAddress.AddrToString(hdr.src_addr, KnxAddress.TYPE.PHYSICAL);
+          hdr.dest_addr = KnxAddress.AddrToString(hdr.dest_addr, hdr.ctrl.destAddrType);
           break;
         default:
           throw "Unhandled message code: "+keyText(MESSAGECODES, hdr.msgcode);
@@ -506,8 +446,8 @@ knxnetprotocol.define('CEMI', {
         .Int8(value.addinfo_length)
         .UInt8(ctrlField1)
         .UInt8(ctrlField2)
-        .raw(StringToAddr(value.src_addr, ADDRESS_TYPE.PHYSICAL), 2)
-        .raw(StringToAddr(value.dest_addr, value.ctrl.destAddrType), 2)
+        .raw(KnxAddress.StringToAddr(value.src_addr, KnxAddress.TYPE.PHYSICAL), 2)
+        .raw(KnxAddress.StringToAddr(value.dest_addr, value.ctrl.destAddrType), 2)
         .Int8(value.apdu_length)
         .Int8(value.tpdu)
         .raw(value.apdu, value.apdu_length);

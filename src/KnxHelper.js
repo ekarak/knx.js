@@ -4,119 +4,7 @@
 var InvalidKnxAddressException = require('./InvalidKnxAddressException');
 var KnxHelper = {};
 
-//           +-----------------------------------------------+
-// 16 bits   |              INDIVIDUAL ADDRESS               |
-//           +-----------------------+-----------------------+
-//           | OCTET 0 (high byte)   |  OCTET 1 (low byte)   |
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    bits   | 7| 6| 5| 4| 3| 2| 1| 0| 7| 6| 5| 4| 3| 2| 1| 0|
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//           |  Subnetwork Address   |                       |
-//           +-----------+-----------+     Device Address    |
-//           |(Area Adrs)|(Line Adrs)|                       |
-//           +-----------------------+-----------------------+
 
-//           +-----------------------------------------------+
-// 16 bits   |             GROUP ADDRESS (3 level)           |
-//           +-----------------------+-----------------------+
-//           | OCTET 0 (high byte)   |  OCTET 1 (low byte)   |
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    bits   | 7| 6| 5| 4| 3| 2| 1| 0| 7| 6| 5| 4| 3| 2| 1| 0|
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//           |  | Main Grp  | Midd G |       Sub Group       |
-//           +--+--------------------+-----------------------+
-
-//           +-----------------------------------------------+
-// 16 bits   |             GROUP ADDRESS (2 level)           |
-//           +-----------------------+-----------------------+
-//           | OCTET 0 (high byte)   |  OCTET 1 (low byte)   |
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//    bits   | 7| 6| 5| 4| 3| 2| 1| 0| 7| 6| 5| 4| 3| 2| 1| 0|
-//           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//           |  | Main Grp  |            Sub Group           |
-//           +--+--------------------+-----------------------+
-KnxHelper.IsAddressIndividual = function (address) {
-    return address.indexOf('.') !== -1;
-}
-
-KnxHelper.GetIndividualAddress = function (addr /*Buffer*/) {
-    return this.GetAddress(addr, '.', false);
-}
-
-KnxHelper.GetGroupAddress = function (addr /*Buffer*/, threeLevelAddressing) {
-    return this.GetAddress(addr, '/', threeLevelAddressing);
-}
-
-
-
-KnxHelper.GetAddress_ = function (address) {
-    try {
-        var addr = new Buffer(2);
-        var threeLevelAddressing = true;
-        var parts;
-        var group = address.indexOf('/') !== -1;
-
-        if (!group) {
-            // individual address
-            parts = address.split('.');
-            if (parts.length != 3 || parts[0].length > 2 || parts[1].length > 2 || parts[2].length > 3)
-                throw new InvalidKnxAddressException(address);
-        }
-        else {
-            // group address
-            parts = address.split('/');
-            if (parts.length != 3 || parts[0].length > 2 || parts[1].length > 1 || parts[2].length > 3) {
-                if (parts.length != 2 || parts[0].length > 2 || parts[1].length > 4)
-                    throw new InvalidKnxAddressException(address);
-
-                threeLevelAddressing = false;
-            }
-        }
-
-        if (!threeLevelAddressing) {
-            var part = parseInt(parts[0]);
-            if (part > 15)
-                throw new InvalidKnxAddressException(address);
-
-            addr[0] = (part << 3) & 255;
-            part = parseInt(parts[1]);
-            if (part > 2047)
-                throw new InvalidKnxAddressException(address);
-
-            var part2 = BitConverter.GetBytes(part);
-            if (part2.length > 2)
-                throw new InvalidKnxAddressException(address);
-
-            addr[0] = (addr[0] | part2[0]) & 255;
-            addr[1] = part2[1];
-        }
-        else {
-            var part = parseInt(parts[0]);
-            if (part > 15)
-                throw new InvalidKnxAddressException(address);
-
-            addr[0] = group
-                ? ((part << 3) & 255)
-                : ((part << 4) & 255);
-
-            part = parseInt(parts[1]);
-            if ((group && part > 7) || (!group && part > 15))
-                throw new InvalidKnxAddressException(address);
-
-            addr[0] = (addr[0] | part) & 255;
-            part = parseInt(parts[2]);
-            if (part > 255)
-                throw new InvalidKnxAddressException(address);
-
-            addr[1] = part & 255;
-        }
-
-        return addr;
-    }
-    catch (e) {
-        throw new InvalidKnxAddressException(address);
-    }
-}
 // Bit order
 // +---+---+---+---+---+---+---+---+
 // | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
@@ -164,11 +52,6 @@ KnxHelper.GetAddress_ = function (address) {
 //   3-0  | Extended Frame Format - 0x0 standard frame
 //  ------+---------------------------------------------------------------
 
-
-KnxDestinationAddressType = KnxHelper.KnxDestinationAddressType = {
-    INDIVIDUAL: 0,
-    GROUP: 1
-}
 
 KnxHelper.GetData = function (dataLength, apdu /*buffer*/) {
     switch (dataLength) {
