@@ -16,18 +16,7 @@ util.inherits(KnxReceiverTunneling, KnxReceiver);
 //		.word8   ( 'channel_id' )
 
 KnxReceiverTunneling.prototype.ProcessDatagramHeaders = function (/*KnxDatagram*/ datagram) {
-/*
-    var service_type = new Buffer(2);
-    service_type[0] = datagram[2];
-    service_type[1] = datagram[3];
 
-    var knxDatagram = new KnxDatagram({
-        header_length: datagram[0],
-        protocol_version: datagram[1],
-        service_type: service_type,
-        total_length: datagram[4] + datagram[5]
-    });
-*/
     var channelId = datagram[7];
     if (channelId != this.connection.ChannelId)
         return;

@@ -4,55 +4,6 @@
 var InvalidKnxAddressException = require('./InvalidKnxAddressException');
 var KnxHelper = {};
 
-
-// Bit order
-// +---+---+---+---+---+---+---+---+
-// | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
-// +---+---+---+---+---+---+---+---+
-
-//  Control Field 1
-
-//   Bit  |
-//  ------+---------------------------------------------------------------
-//    7   | Frame Type  - 0x0 for extended frame
-//        |               0x1 for standard frame
-//  ------+---------------------------------------------------------------
-//    6   | Reserved
-//        |
-//  ------+---------------------------------------------------------------
-//    5   | Repeat Flag - 0x0 repeat frame on medium in case of an error
-//        |               0x1 do not repeat
-//  ------+---------------------------------------------------------------
-//    4   | System Broadcast - 0x0 system broadcast
-//        |                    0x1 broadcast
-//  ------+---------------------------------------------------------------
-//    3   | Priority    - 0x0 system
-//        |               0x1 normal (also called alarm priority)
-//  ------+               0x2 urgent (also called high priority)
-//    2   |               0x3 low
-//        |
-//  ------+---------------------------------------------------------------
-//    1   | Acknowledge Request - 0x0 no ACK requested
-//        | (L_Data.req)          0x1 ACK requested
-//  ------+---------------------------------------------------------------
-//    0   | Confirm      - 0x0 no error
-//        | (L_Data.con) - 0x1 error
-//  ------+---------------------------------------------------------------
-
-
-//  Control Field 2
-
-//   Bit  |
-//  ------+---------------------------------------------------------------
-//    7   | Destination Address Type - 0x0 individual address
-//        |                          - 0x1 group address
-//  ------+---------------------------------------------------------------
-//   6-4  | Hop Count (0-7)
-//  ------+---------------------------------------------------------------
-//   3-0  | Extended Frame Format - 0x0 standard frame
-//  ------+---------------------------------------------------------------
-
-
 KnxHelper.GetData = function (dataLength, apdu /*buffer*/) {
     switch (dataLength) {
         case 0:

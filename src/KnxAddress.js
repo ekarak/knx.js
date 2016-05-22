@@ -31,20 +31,19 @@ var Parser = require('binary-parser').Parser;
 //           +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 //           |  | Main Grp  |            Sub Group           |
 //           +--+--------------------+-----------------------+
-var knxaddress = {};
+var KnxAddress = {};
 
-var TYPE = knxaddress.TYPE = {
+var TYPE = KnxAddress.TYPE = {
   PHYSICAL: 0x00,
   GROUP: 0x01
 };
 //
-
 var threeLevelPhysical = (new Parser()).bit4('l1').bit4('l2').uint8('l3');
 var threeLevelGroup    = (new Parser()).bit1('rsvd').bit4('l1').bit3('l2').uint8('l3');
 var twoLevel           = (new Parser()).bit1('rsvd').bit4('l1').bit11('l2');
 
 // convert address stored in two-byte buffer to string
-knxaddress.AddrToString = function (buf /*buffer*/, addrtype /*ADDRESS_TYPE*/, twoLevelAddressing) {
+KnxAddress.toString = function (buf /*buffer*/, addrtype /*ADDRESS_TYPE*/, twoLevelAddressing) {
   var group = (addrtype == TYPE.GROUP) ;
   var address = null;
   //console.log('%j, type: %d, %j', buf, addrtype, knxnetprotocol.twoLevelAddressing);
@@ -63,7 +62,8 @@ knxaddress.AddrToString = function (buf /*buffer*/, addrtype /*ADDRESS_TYPE*/, t
   return address;
 }
 
-knxaddress.StringToAddr = function (addr /*string*/, addrtype /*ADDRESS_TYPE*/, twoLevelAddressing) {
+// parse address string to 2-byte Buffer
+KnxAddress.parse = function (addr /*string*/, addrtype /*TYPE*/, twoLevelAddressing) {
   var group = (addrtype === TYPE.GROUP) ;
   var address = new Buffer(2);
   var tokens  = addr.split((group ? '/' : '.'));
@@ -95,4 +95,4 @@ knxaddress.StringToAddr = function (addr /*string*/, addrtype /*ADDRESS_TYPE*/, 
   return address;
 }
 
-module.exports = knxaddress;
+module.exports = KnxAddress;
