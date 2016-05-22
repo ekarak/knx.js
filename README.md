@@ -1,12 +1,14 @@
+A KNXnet/IP implementation for Javascript
 Based on https://github.com/lifeemotions/knx.net
 
-Right now it not tested in all directions, but KnxConnectionTunneling is working.
-One can find Usage example, it tested with KNXnet/IP router: ABB IPR/S 2.1.
- 
+#Installation
+`npm install knx`
+
+
 #Usage
 
 ```
-var KnxConnectionTunneling = require('knx.js').KnxConnectionTunneling;
+var KnxConnectionTunneling = require('knx').KnxConnectionTunneling;
 var connection = new KnxConnectionTunneling('192.168.2.222', 3671, '192.168.2.107', 13671);
 
 var lightValue = false;
@@ -27,6 +29,3 @@ connection.Connect(function () {
 
 ```
  
-# License
-
-![Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png "CC BY-NC-SA 4.0")

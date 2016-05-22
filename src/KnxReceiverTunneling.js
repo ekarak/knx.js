@@ -3,7 +3,8 @@
  * refactored by ekarakou
  */
 var util = require('util');
-var KnxDatagram = require('./KnxDatagram');
+
+var KnxProtocol = require('./KnxProtocol');
 var KnxReceiver = require('./KnxReceiver');
 
 function KnxReceiverTunneling(/*KnxConnection*/ connection) {

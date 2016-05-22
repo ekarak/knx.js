@@ -4,6 +4,107 @@ var KnxHelper = require('./KnxHelper.js');
 var BinaryProtocol = require('binary-protocol');
 var knxnetprotocol = new BinaryProtocol();
 
+// defaults
+knxnetprotocol.twoLevelAddressing = false;
+
+var ADDRESS_TYPE = knxnetprotocol.ADDRESS_TYPE = {
+  PHYSICAL: 0x00,
+  GROUP: 0x01
+};
+//
+var SERVICE_TYPE = knxnetprotocol.SERVICE_TYPE = {
+    SEARCH_REQUEST:   0x0201,
+    SEARCH_RESPONSE:  0x0202,
+    DESCRIPTION_REQUEST:  0x0203,
+    DESCRIPTION_RESPONSE: 0x0204,
+    CONNECT_REQUEST:   0x0205,
+    CONNECT_RESPONSE:  0x0206,
+    CONNECTIONSTATE_REQUEST:  0x0207,
+    CONNECTIONSTATE_RESPONSE: 0x0208,
+    DISCONNECT_REQUEST:   0x0208,
+    DISCONNECT_RESPONSE:  0x020a,
+    DEVICE_CONFIGURATION_REQUEST: 0x0310,
+    DEVICE_CONFIGURATION_ACK:     0x0311,
+    TUNNELLING_REQUEST: 0x0420,
+    TUNNELLING_ACK:     0x0421,
+    ROUTING_INDICATION:   0x0530,
+    ROUTING_LOST_MESSAGE: 0x0531,
+    UNKNOWN: -1
+};
+//
+var CONNECTION_TYPE = knxnetprotocol.CONNECTION_TYPE = {
+  DEVICE_MGMT_CONNECTION: 0x03,
+  TUNNEL_CONNECTION: 0x04
+};
+//
+var PROTOCOL_TYPE = knxnetprotocol.PROTOCOL_TYPE = {
+  IPV4_UDP: 0x01,
+  IPV4_TCP: 0x02,
+};
+//
+var KNX_LAYER = knxnetprotocol.KNX_LAYER = {
+  LINK_LAYER: 0x02,      /** Tunneling on link layer, establishes a link layer tunnel to the KNX network.*/
+  RAW_LAYER: 0x04,  /** Tunneling on raw layer, establishes a raw tunnel to the KNX network. */
+  BUSMONITOR_LAYER: 0x80 /** Tunneling on busmonitor layer, establishes a busmonitor tunnel to the KNX network.*/
+}
+
+var threeLevelPhysical = (new Parser()).bit4('l1').bit4('l2').uint8('l3');
+var threeLevelGroup    = (new Parser()).bit1('rsvd').bit4('l1').bit3('l2').uint8('l3');
+var twoLevel           = (new Parser()).bit1('rsvd').bit4('l1').bit11('l2');
+// convert address stored in two-byte buffer to string
+var AddrToString = knxnetprotocol.AddrToString = function (buf /*buffer*/, addrtype /*ADDRESS_TYPE*/) {
+  var group = (addrtype == ADDRESS_TYPE.GROUP) ;
+  var address = null;
+  //console.log('%j, type: %d, %j', buf, addrtype, knxnetprotocol.twoLevelAddressing);
+  if (!(typeof buf === 'object' && buf.constructor.name == 'Buffer' && buf.length == 2))
+    throw "not a buffer, or not a 2-byte address buffer"
+  if (group && knxnetprotocol.twoLevelAddressing) {
+    // 2 level group
+    var addr = twoLevel.parse(buf);
+    address = [addr.l1, addr.l2].join('/');
+  }  else {
+    // 3 level physical or group address
+    var sep  = (group ? '/' : '.');
+    var addr = (group ? threeLevelGroup : threeLevelPhysical).parse(buf);
+    address = [addr.l1, addr.l2, addr.l3].join(sep);
+  }
+  if (knxnetprotocol.debug) console.log('$$$ addr: %j', addr);
+  return address;
+}
+
+var StringToAddr = knxnetprotocol.StringToAddr = function (addr /*string*/, addrtype /*ADDRESS_TYPE*/) {
+  var group = (addrtype === ADDRESS_TYPE.GROUP) ;
+  var address = new Buffer(2);
+  var tokens  = addr.split((group ? '/' : '.'));
+  var hinibble = parseInt(tokens[0]);
+  var midnibble = parseInt(tokens[1]);
+  if (group && knxnetprotocol.twoLevelAddressing) {
+    // 2 level group address
+    if (hinibble < 0 || hinibble > 15)     throw "Invalid KNX 2-level main group";
+    if (midnibble < 0 || midnibble > 2047) throw "Invalid KNX 2-level sub group";
+    address.writeUInt16BE((hinibble << 11) + midnibble, 0);
+  } else {
+    var lonibble = parseInt(tokens[2]);
+    if (group) {
+      // 3 level group address
+      if (hinibble < 0  || hinibble > 15)  throw "Invalid KNX 3-level main group";
+      if (midnibble < 0 || midnibble > 7)  throw "Invalid KNX 3-level mid group";
+      if (lonibble < 0  || lonibble > 255) throw "Invalid KNX 3-level sub group";
+      address.writeUInt8((hinibble << 3) + midnibble, 0);
+      address.writeUInt8(lonibble ,1);
+    } else {
+      // 3 level physical address
+      if (hinibble < 0  || hinibble > 15)  throw "Invalid KNX area address";
+      if (midnibble < 0 || midnibble > 15) throw "Invalid KNX line address";
+      if (lonibble < 0  || lonibble > 255) throw "Invalid KNX device address";
+      address.writeUInt8((hinibble << 4) + midnibble, 0);
+      address.writeUInt8(lonibble, 1);
+    }
+    if (knxnetprotocol.debug) console.log('$$$ addr: %j', address);
+  }
+  return address;
+}
+//
 knxnetprotocol.define('IPv4Endpoint', {
   read: function (propertyName) {
     this.pushStack({ addr: null, port: null})
@@ -14,17 +115,19 @@ knxnetprotocol.define('IPv4Endpoint', {
        });
      },
   write: function (value) {
-    if (!(typeof value === 'string' && value.match(/\d*\.\d*\.\d*\.\d*:\d*/))) {
-      throw "Invalid IPv4 endpoint, please provide ipaddress:port";
+    if (value === null) throw "cannot write null value"
+    else {
+      if (!(typeof value === 'string' && value.match(/\d*\.\d*\.\d*\.\d*:\d*/))) {
+        throw "Invalid IPv4 endpoint, please provide ipaddress:port";
+      }
+      var arr = value.split(':');
+      this.UInt32BE(ipv4.aton(arr[0]));
+      this.UInt16BE(arr[1]);
     }
-    var arr = value.split(':');
-    console.log("ipv4 write: %j", arr);
-    this.UInt32BE(ipv4.aton(arr[0]));
-    this.UInt16BE(arr[1]);
   }
 });
 
-/* helper function to print enum keys */
+/* TODO: move helper function to print enum keys */
 function keyText(map, value) {
   for (var key in map) {
     if (map[key] == value) return key;
@@ -32,29 +135,12 @@ function keyText(map, value) {
   return "(not found: "+value+")";
 }
 
-/* CRI */
+/* CRI: connection request/response */
 // creq[22] = 0x04;  /* structure len (4 bytes) */
 // creq[23] = 0x04;  /* connection type: DEVICE_MGMT_CONNECTION = 0x03; TUNNEL_CONNECTION = 0x04; */
 // creq[24] = 0x02;  /* KNX Layer (Tunnel Link Layer) */
 // creq[25] = 0x00;  /* Reserved */
 // ==> 4 bytes
-var CONNECTION_TYPE = {
-  DEVICE_MGMT_CONNECTION: 0x03,
-  TUNNEL_CONNECTION: 0x04
-};
-/** Tunneling on busmonitor layer, establishes a busmonitor tunnel to the KNX network.
-public static final int BUSMONITOR_LAYER = 0x80; */
-/** Tunneling on link layer, establishes a link layer tunnel to the KNX network.
-public static final int LINK_LAYER = 0x02; */
-/** Tunneling on raw layer, establishes a raw tunnel to the KNX network.
-public static final int RAW_LAYER = 0x04; */
-var KNX_LAYER = {
-  LINK_LAYER: 0x02,
-  RAW_LAYER: 0x03,
-  BUSMONITOR_LAYER: 0x80
-}
-
-// CRI: connection request/response
 knxnetprotocol.define('CRI', {
   read: function (propertyName) {
     this
@@ -73,18 +159,20 @@ knxnetprotocol.define('CRI', {
       }
     })
     .popStack(propertyName, function (data) {
-      console.log('read CRI: '+JSON.stringify(data));
+      if (knxnetprotocol.debug) console.log('read CRI: '+JSON.stringify(data));
       // pop the interim value off the stack and insert the real value into `propertyName`
       return data
     });
   },
   write: function (value) {
-    this
-      .Int8  (value.header_length)
-      .Int8  (value.connection_type)
-      .Int8  (value.knx_layer)
-      .Int8  (value.unused);
-      // TODO?
+    if (value === null) throw "cannot write null value"
+    else {
+      this
+        .Int8  (0x04)
+        .Int8  (value.connection_type)
+        .Int8  (value.knx_layer)
+        .Int8  (value.unused);
+    }
   }
 });
 
@@ -95,14 +183,17 @@ knxnetprotocol.define('ConnState', {
     .Int8('channel_id')
     .Int8('seqnum')
     .popStack(propertyName, function (data) {
-      console.log('read ConnState: %j', data);
+      if (knxnetprotocol.debug) console.log('read ConnState: %j', data);
       return data;
     });
   },
   write: function (value) {
-    this
-      .Int8(value.channel_id)
-      .Int8(value.seqnum);
+    if (value === null) throw "cannot write null value"
+    else {
+      this
+        .Int8(value.channel_id)
+        .Int8(value.seqnum);
+    }
   }
 });
 
@@ -115,7 +206,7 @@ knxnetprotocol.define('SeqState', {
     .Int8('seqnum')
     .Int8('rsvd')
     .tap(function (hdr) {
-      console.log('reading SeqState: %j', hdr);
+      if (knxnetprotocol.debug) console.log('reading SeqState: %j', hdr);
       switch (hdr.status) {
         case 0x00:
           break;
@@ -128,12 +219,15 @@ knxnetprotocol.define('SeqState', {
     });
   },
   write: function (value) {
-    console.log('writing SeqState: %j', value);
-    this
-      .Int8(value.length)
-      .Int8(value.channel_id)
-      .Int8(value.seqnum)
-      .Int8(value.rsvd);
+    if (value === null) throw "cannot write null value"
+    else {
+      if (knxnetprotocol.debug) console.log('writing SeqState: %j', value);
+      this
+        .Int8(value.length)
+        .Int8(value.channel_id)
+        .Int8(value.seqnum)
+        .Int8(value.rsvd);
+    }
   }
 });
 
@@ -151,10 +245,6 @@ knxnetprotocol.define('SeqState', {
 //   creq[16-19] =  /* IPv4 address  */
 //   creq[20-21] =  /* IPv4 local port number for TUNNELLING requests */
 // ==> 8 bytes
-var PROTOCOL_TYPE = {
-    IPV4_UDP: 0x01,
-    IPV4_TCP: 0x02,
-};
 knxnetprotocol.define('HPAI', {
   read: function (propertyName) {
     this.pushStack({ header_length: 0, protocol_type: null,  total_length: 0})
@@ -162,10 +252,12 @@ knxnetprotocol.define('HPAI', {
     .Int8('protocol_type')
     .IPv4Endpoint('tunnelEndpoint')
     .tap(function (hdr) {
-      console.log('read HPAI: %j', hdr);
       if (hdr.header_length < hdr.length)
         throw "Incomplete KNXNet HPAI header";
-      console.log("     HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
+      if (knxnetprotocol.debug) {
+        console.log('read HPAI: %j', hdr);
+        console.log("     HPAI: proto = %s", keyText(PROTOCOL_TYPE, hdr.protocol_type));
+      }
       switch (hdr.service_type) {
         case PROTOCOL_TYPE.IPV4_TCP:
           throw "TCP is unsupported";
@@ -177,10 +269,13 @@ knxnetprotocol.define('HPAI', {
     });
   },
   write: function (value) {
-    this
-      .Int8(value.header_length)
-      .Int8(value.protocol_type)
-      .IPv4Endpoint(value.tunnelEndpoint);
+    if (value === null) throw "cannot write null value"
+    else {
+      this
+        .Int8(value.header_length)
+        .Int8(value.protocol_type)
+        .IPv4Endpoint(value.tunnelEndpoint);
+    }
   }
 });
 
@@ -236,47 +331,7 @@ knxnetprotocol.define('HPAI', {
 //                    protocol control information (TPCI), application protocol control
 //                    information (APCI) and data passed as an argument from higher layers of
 //                    the KNX communication stack
-/*
-parser.packet('knxnet_apci',
-   'b16{flags: b3, fragmentOffset: b13},       \
-   timeToLive: b8,                     \
-   protocol: b8,                       \
-   checksum: b16,                      \
-   sourceAddress: b16,                 \
-   destinationAddress: b16             \
-  ');
-*/
-knxnetprotocol.define('APCI', {
- read: function (propertyName) {
-    console.log('reading APCI');
-    this.pushStack({ tpci: null, ttl: null, ctrl: null, proto: null, csum: null, src_addr: null, dest_addr: null, apdu_length: null })
-    .UInt16BE('tpci')
-    .Int8('ttl')
-    .Int8('proto')
-    .UInt16BE('csum')
-    .UInt16BE('src_addr')
-    .UInt16BE('dest_addr')
-    .Uint8('apdu_length')
-    .tap(function (hdr) {
-      // TODO: bitshifting for the two ctrl bytes
-      console.log('read APCI: %j', hdr);
-      return hdr;
-    })
-    .popStack(propertyName, function (data) {
-      return data;
-    });
-  },
-  write: function (value) {
-   this
-    .UInt16BE(value.tpci)
-    .Int8(value.ttl)
-    .Int8(value.proto)
-    .UInt16BE(value.csum)
-    .UInt16BE(value.src_addr)
-    .UInt16BE(value.dest_addr)
-    .Uint8(value.apdu_length);
-  }
-});
+
 
 /* ==================== CEMI ====================== */
 
@@ -330,11 +385,48 @@ Control Field 1
           3-0  | Extended Frame Format - 0x0 standard frame
          ------+---------------------------------------------------------------
 */
-var FRAME_TYPE = {
+// In the Common EMI frame, the APDU payload is defined as follows:
+
+// +--------+--------+--------+--------+--------+
+// | TPCI + | APCI + |  Data  |  Data  |  Data  |
+// |  APCI  |  Data  |        |        |        |
+// +--------+--------+--------+--------+--------+
+//   byte 1   byte 2  byte 3     ...     byte 16
+
+// For data that is 6 bits or less in length, only the first two bytes are used in a Common EMI
+// frame. Common EMI frame also carries the information of the expected length of the Protocol
+// Data Unit (PDU). Data payload can be at most 14 bytes long.  <p>
+
+// The first byte is a combination of transport layer control information (TPCI) and application
+// layer control information (APCI). First 6 bits are dedicated for TPCI while the two least
+// significant bits of first byte hold the two most significant bits of APCI field, as follows:
+
+//   Bit 1    Bit 2    Bit 3    Bit 4    Bit 5    Bit 6    Bit 7    Bit 8      Bit 1   Bit 2
+// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
+// |        |        |        |        |        |        |        |        ||        |
+// |  TPCI  |  TPCI  |  TPCI  |  TPCI  |  TPCI  |  TPCI  | APCI   |  APCI  ||  APCI  |
+// |        |        |        |        |        |        |(bit 1) |(bit 2) ||(bit 3) |
+// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
+// +                            B  Y  T  E    1                            ||       B Y T E  2
+// +-----------------------------------------------------------------------++-------------....
+
+//Total number of APCI control bits can be either 4 or 10. The second byte bit structure is as follows:
+
+//   Bit 1    Bit 2    Bit 3    Bit 4    Bit 5    Bit 6    Bit 7    Bit 8      Bit 1   Bit 2
+// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
+// |        |        |        |        |        |        |        |        ||        |
+// |  APCI  |  APCI  | APCI/  |  APCI/ |  APCI/ |  APCI/ | APCI/  |  APCI/ ||  Data  |  Data
+// |(bit 3) |(bit 4) | Data   |  Data  |  Data  |  Data  | Data   |  Data  ||        |
+// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
+// +                            B  Y  T  E    2                            ||       B Y T E  3
+// +-----------------------------------------------------------------------++-------------....
+
+knxnetprotocol.FRAME_TYPE = {
    EXTENDED: 0x00,
    STANDARD: 0x01,
 };
-var MESSAGECODES = {
+var FRAME_TYPE  = knxnetprotocol.FRAME_TYPE;
+knxnetprotocol.MESSAGECODES = {
   "L_Raw.req":       0x10,
   "L_Data.req":      0x11,
   "L_Poll_Data.req": 0x13,
@@ -345,7 +437,7 @@ var MESSAGECODES = {
   "L_Data.con":      0x2E,
   "L_Raw.con":       0x2F
 };
-
+var MESSAGECODES = knxnetprotocol.MESSAGECODES;
 // control field
 var ctrlStruct = new Parser()
   // byte 1
@@ -367,19 +459,21 @@ knxnetprotocol.define('CEMI', {
     .Int8('msgcode')
     .Int8('addinfo_length')
     .raw('ctrl', 2)
-    .UInt16BE('src_addr')
-    .UInt16BE('dest_addr')
+    .raw('src_addr', 2)
+    .raw('dest_addr', 2)
     .Int8('apdu_length')
     .Int8('tpdu')
     .tap(function (hdr) {
       // parse 16bit control field
-      console.log(hdr.ctrl);
       hdr.ctrl = ctrlStruct.parse(hdr.ctrl);
-      console.log("ctrl fields: %j", hdr.ctrl);
+      if (knxnetprotocol.debug) console.log("ctrl fields: %j", hdr.ctrl);
+      // TODO: convert addresses to string
       switch(hdr.msgcode) {
         case MESSAGECODES["L_Data.ind"]: // received a data frame
         case MESSAGECODES["L_Data.con"]: // received a data frame
           this.raw('apdu', hdr.apdu_length);
+          hdr.src_addr  = AddrToString(hdr.src_addr, ADDRESS_TYPE.PHYSICAL);
+          hdr.dest_addr = AddrToString(hdr.dest_addr, hdr.ctrl.destAddrType);
           break;
         default:
           throw "Unhandled message code: "+keyText(MESSAGECODES, hdr.msgcode);
@@ -389,58 +483,41 @@ knxnetprotocol.define('CEMI', {
       return hdr;
     })
     .popStack(propertyName, function (data) {
-      //console.log('popStack CEMI: %j', data);
       return data;
     });
   },
   write: function (value) {
-    var ctrlField1 =
-      value.ctrl.frameType   * 0x80 +
-      value.ctrl.reserved    * 0x40 +
-      value.ctrl.repeat      * 0x20 +
-      value.ctrl.broadcast   * 0x10 +
-      value.ctrl.priority    * 0x04 +
-      value.ctrl.acknowledge * 0x02 +
-      value.ctrl.confirm;
-    var ctrlField2 =
-      value.ctrl.destAddrType* 0x80 +
-      value.ctrl.hopCount    * 0x10 +
-      value.ctrl.extendedFrame;
-   this
-     .Int8(value.msgcode)
-     .Int8(value.addinfo_length)
-     .UInt8(ctrlField1)
-     .UInt8(ctrlField2)
-     .UInt16BE(value.src_addr)
-     .UInt16BE(value.dest_addr)
-     .Int8(value.apdu_length)
-     .Int8(value.tpdu)
-     .raw(value.apdu, value.apdu_length);
+    if (value === null) throw "cannot write null value"
+    else {
+      var ctrlField1 =
+        value.ctrl.frameType   * 0x80 +
+        value.ctrl.reserved    * 0x40 +
+        value.ctrl.repeat      * 0x20 +
+        value.ctrl.broadcast   * 0x10 +
+        value.ctrl.priority    * 0x04 +
+        value.ctrl.acknowledge * 0x02 +
+        value.ctrl.confirm;
+      var ctrlField2 =
+        value.ctrl.destAddrType* 0x80 +
+        value.ctrl.hopCount    * 0x10 +
+        value.ctrl.extendedFrame;
+      this
+        .Int8(value.msgcode)
+        .Int8(value.addinfo_length)
+        .UInt8(ctrlField1)
+        .UInt8(ctrlField2)
+        .raw(StringToAddr(value.src_addr, ADDRESS_TYPE.PHYSICAL), 2)
+        .raw(StringToAddr(value.dest_addr, value.ctrl.destAddrType), 2)
+        .Int8(value.apdu_length)
+        .Int8(value.tpdu)
+        .raw(value.apdu, value.apdu_length);
+    }
   }
 });
 
-var SERVICE_TYPE = {
-    SEARCH_REQUEST:   0x0201,
-    SEARCH_RESPONSE:  0x0202,
-    DESCRIPTION_REQUEST:  0x0203,
-    DESCRIPTION_RESPONSE: 0x0204,
-    CONNECT_REQUEST:   0x0205,
-    CONNECT_RESPONSE:  0x0206,
-    CONNECTIONSTATE_REQUEST:  0x0207,
-    CONNECTIONSTATE_RESPONSE: 0x0208,
-    DISCONNECT_REQUEST:   0x0208,
-    DISCONNECT_RESPONSE:  0x020a,
-    DEVICE_CONFIGURATION_REQUEST: 0x0310,
-    DEVICE_CONFIGURATION_ACK:     0x0311,
-    TUNNELLING_REQUEST: 0x0420,
-    TUNNELLING_ACK:     0x0421,
-    ROUTING_INDICATION:   0x0530,
-    ROUTING_LOST_MESSAGE: 0x0531,
-    UNKNOWN: -1
-};
 knxnetprotocol.define('KNXNetHeader', {
   read: function (propertyName) {
-    console.log('reading KNXNetHeader');
+    if (knxnetprotocol.debug) console.log('reading KNXNetHeader');
     this.pushStack({ header_length: 0, protocol_version: -1, service_type: -1, total_length: 0})
     .Int8   ('header_length')
     .Int8   ('protocol_version')
@@ -449,7 +526,7 @@ knxnetprotocol.define('KNXNetHeader', {
     .tap(function (hdr) {
       if (hdr.header_length < hdr.length)
         throw "Incomplete KNXNet header";
-      console.log("offset %d ==> %s", this.offset, keyText(SERVICE_TYPE, hdr.service_type));
+      if (knxnetprotocol.debug) console.log("offset %d ==> %s", this.offset, keyText(SERVICE_TYPE, hdr.service_type));
       switch (hdr.service_type) {
 //        case SERVICE_TYPE.SEARCH_REQUEST:
         case SERVICE_TYPE.CONNECT_REQUEST: {
@@ -476,10 +553,14 @@ knxnetprotocol.define('KNXNetHeader', {
         }
         // most common case:
         case SERVICE_TYPE.TUNNELLING_REQUEST: {
-          this.SeqState('seqstate').CEMI('cemi').collect(function (data) {
-            return data;
-          });
+          this
+            .SeqState('seqstate')
+            .CEMI('cemi');
+
           break;
+        }
+        case SERVICE_TYPE.TUNNELLING_ACK: {
+
         }
         default: {
           console.log("KNXNetHeader: unhandled serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
@@ -487,16 +568,17 @@ knxnetprotocol.define('KNXNetHeader', {
       }
     })
     .popStack(propertyName, function (data) {
+      if (knxnetprotocol.debug) console.log('popStack: %s', JSON.stringify(data, null, 4));
       return data;
     });
   },
   write: function (value) {
-    console.log("writing KnxHeader:", value);
+    //console.log("writing KnxHeader:", value);
     if (value === null) throw "cannot write null value"
     else {
       this
-      .Int8   (6)
-      .Int8   (0x10)
+      .Int8   (6)    // bytes: header length (constant)
+      .Int8   (0x10) // protocol version 1.0
       .Int16BE(value.service_type)
       .Int16BE(value.total_length);
       switch (value.service_type) {
@@ -527,13 +609,13 @@ knxnetprotocol.define('KNXNetHeader', {
           break;
         }
         default: {
-          console.log("KNXNetHeader: unhandled serviceType = %s", keyText(SERVICE_TYPE, hdr.service_type));
+          throw String.format(
+            "KNXNetHeader: unhandled serviceType = %s",
+            keyText(SERVICE_TYPE, hdr.service_type));
         }
       }
     }
   }
 });
-
-
 
 module.exports = knxnetprotocol;

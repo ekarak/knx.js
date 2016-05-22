@@ -47,37 +47,7 @@ KnxHelper.GetGroupAddress = function (addr /*Buffer*/, threeLevelAddressing) {
     return this.GetAddress(addr, '/', threeLevelAddressing);
 }
 
-KnxHelper.GetAddress = function (addr /*buffer*/, separator, threeLevelAddressing) {
-    if (addr && !separator && (threeLevelAddressing === null || threeLevelAddressing == undefined))
-        return this.GetAddress_(addr);
-    var group = separator === '/';
-    var address = null;
 
-    if (group && !threeLevelAddressing) {
-        // 2 level group
-        address = (addr[0] >> 3).toString();
-        address += separator;
-        address += (((addr[0] & 0x07) << 8) + addr[1]).toString(); // this may not work, must be checked
-    }
-    else {
-        // 3 level individual or group
-        address = group
-            ? ((addr[0] & 0x7F) >> 3).toString()
-            : (addr[0] >> 4).toString();
-
-        address += separator;
-
-        if (group)
-            address += (addr[0] & 0x07).toString();
-        else
-            address += (addr[0] & 0x0F).toString();
-
-        address += separator;
-        address += addr[1].toString();
-    }
-
-    return address;
-}
 
 KnxHelper.GetAddress_ = function (address) {
     try {
@@ -200,47 +170,6 @@ KnxDestinationAddressType = KnxHelper.KnxDestinationAddressType = {
     GROUP: 1
 }
 
-KnxHelper.GetKnxDestinationAddressType = function (control_field_2) {
-    return (0x80 & control_field_2) != 0
-        ? KnxDestinationAddressType.GROUP
-        : KnxDestinationAddressType.INDIVIDUAL;
-}
-
-// In the Common EMI frame, the APDU payload is defined as follows:
-
-// +--------+--------+--------+--------+--------+
-// | TPCI + | APCI + |  Data  |  Data  |  Data  |
-// |  APCI  |  Data  |        |        |        |
-// +--------+--------+--------+--------+--------+
-//   byte 1   byte 2  byte 3     ...     byte 16
-
-// For data that is 6 bits or less in length, only the first two bytes are used in a Common EMI
-// frame. Common EMI frame also carries the information of the expected length of the Protocol
-// Data Unit (PDU). Data payload can be at most 14 bytes long.  <p>
-
-// The first byte is a combination of transport layer control information (TPCI) and application
-// layer control information (APCI). First 6 bits are dedicated for TPCI while the two least
-// significant bits of first byte hold the two most significant bits of APCI field, as follows:
-
-//   Bit 1    Bit 2    Bit 3    Bit 4    Bit 5    Bit 6    Bit 7    Bit 8      Bit 1   Bit 2
-// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
-// |        |        |        |        |        |        |        |        ||        |
-// |  TPCI  |  TPCI  |  TPCI  |  TPCI  |  TPCI  |  TPCI  | APCI   |  APCI  ||  APCI  |
-// |        |        |        |        |        |        |(bit 1) |(bit 2) ||(bit 3) |
-// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
-// +                            B  Y  T  E    1                            ||       B Y T E  2
-// +-----------------------------------------------------------------------++-------------....
-
-//Total number of APCI control bits can be either 4 or 10. The second byte bit structure is as follows:
-
-//   Bit 1    Bit 2    Bit 3    Bit 4    Bit 5    Bit 6    Bit 7    Bit 8      Bit 1   Bit 2
-// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
-// |        |        |        |        |        |        |        |        ||        |
-// |  APCI  |  APCI  | APCI/  |  APCI/ |  APCI/ |  APCI/ | APCI/  |  APCI/ ||  Data  |  Data
-// |(bit 3) |(bit 4) | Data   |  Data  |  Data  |  Data  | Data   |  Data  ||        |
-// +--------+--------+--------+--------+--------+--------+--------+--------++--------+----....
-// +                            B  Y  T  E    2                            ||       B Y T E  3
-// +-----------------------------------------------------------------------++-------------....
 KnxHelper.GetData = function (dataLength, apdu /*buffer*/) {
     switch (dataLength) {
         case 0:
@@ -297,33 +226,7 @@ KnxHelper.WriteData = function (/*buffer*/ datagram, /*buffer*/ data, dataStart)
     }
 }
 
-KnxHelper.GetServiceType = function (/*buffer*/ datagram) {
-    switch (datagram[2]) {
-        case (0x02):
-        {
-            switch (datagram[3]) {
-                case (0x06):
-                    return SERVICE_TYPE.CONNECT_RESPONSE;
-                case (0x09):
-                    return SERVICE_TYPE.DISCONNECT_REQUEST;
-                case (0x08):
-                    return SERVICE_TYPE.CONNECTIONSTATE_RESPONSE;
-            }
-        }
-            break;
-        case (0x04):
-        {
-            switch (datagram[3]) {
-                case (0x20):
-                    return SERVICE_TYPE.TUNNELLING_REQUEST;
-                case (0x21):
-                    return SERVICE_TYPE.TUNNELLING_ACK;
-            }
-        }
-            break;
-    }
-    return SERVICE_TYPE.UNKNOWN;
-}
+
 
 KnxHelper.GetChannelId = function (/*buffer*/datagram) {
     if (datagram.length > 6)
