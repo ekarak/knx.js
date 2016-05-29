@@ -60,13 +60,4 @@ KnxHelper.WriteData = function (/*buffer*/ datagram, /*buffer*/ data, dataStart)
     }
 }
 
-
-
-KnxHelper.GetChannelId = function (/*buffer*/datagram) {
-    if (datagram.length > 6)
-        return datagram[6];
-
-    return -1;
-}
-
 module.exports = KnxHelper;

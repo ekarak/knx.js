@@ -3,11 +3,12 @@
  * refactored by ekarakou
  */
 const KNXProtocol = require('./KnxProtocol');
+const KnxConstants = require ('./KnxConstants');
 
 function KnxReceiver(/*KnxConnection*/ connection) {
 	if (connection.debug) console.log('new KnxReceiver');
     this.connection = connection;
-		this._rxSequenceNumber = null;
+		this._rxSequenceNumber = 0;
 }
 
 KnxReceiver.prototype.Start = function (callback) {
@@ -16,12 +17,13 @@ KnxReceiver.prototype.Start = function (callback) {
   this.socketReceiveLstnr = function (msg, rinfo) {
 		if (self.connection.debug) console.log('KnxReceiverTunneling.socketReceiveLstnr');
       try {
-        var reader = KNXProtocol.createReader(buf);
-        reader.KNXNetHeader('packet'+this._rxSequenceNumber);
+        var reader = KNXProtocol.createReader(msg);
+        var packetId = 'packet'+this._rxSequenceNumber;
+        reader.KNXNetHeader(packetId);
         var datagram = reader.next();
-				self.ProcessDatagram(datagram);
+				self.ProcessDatagram(datagram[packetId]);
       } catch (e) {
-        console.error('Error processing KNX incoming datagram[' + msg.toString('hex') + '], cause: ' + e.toLocaleString());
+        console.trace('Error processing KNX incoming datagram[' + msg.toString('hex') + '], cause: ' + e.toLocaleString());
       }
   }
 	this.connection.BindSocket(callback);
@@ -34,31 +36,35 @@ KnxReceiver.prototype.Stop = function () {
 
 KnxReceiver.prototype.ProcessDatagram = function (datagram) {
     if (this.connection.debug)
-        console.log('ProcessDatagram datagram[%s]', datagram.toString('hex'));
+      console.log('ProcessDatagram %s: %j',
+        KnxConstants.keyText(KnxConstants.SERVICE_TYPE, datagram.service_type),
+        datagram);
     try {
         switch (datagram.service_type) {
-            case KNXProtocol.SERVICE_TYPE.CONNECT_RESPONSE:
+            case KnxConstants.SERVICE_TYPE.CONNECT_RESPONSE:
                 this.ProcessConnectResponse(datagram);
                 break;
-            case KNXProtocol.SERVICE_TYPE.CONNECTIONSTATE_RESPONSE:
+            case KnxConstants.SERVICE_TYPE.CONNECTIONSTATE_RESPONSE:
                 this.ProcessConnectionStateResponse(datagram);
                 break;
-            case KNXProtocol.SERVICE_TYPE.TUNNELLING_ACK:
+            case KnxConstants.SERVICE_TYPE.TUNNELLING_ACK:
                 this.ProcessTunnelingAck(datagram);
                 break;
-            case KNXProtocol.SERVICE_TYPE.DISCONNECT_REQUEST:
+            case KnxConstants.SERVICE_TYPE.DISCONNECT_REQUEST:
                 this.ProcessDisconnectRequest(datagram);
                 break;
-            case KNXProtocol.SERVICE_TYPE.TUNNELLING_REQUEST:
+            case KnxConstants.SERVICE_TYPE.TUNNELLING_REQUEST:
                 this.ProcessDatagramHeaders(datagram);
                 break;
             default:
-                console.log('Unknown serviceType of datagram[%j]', datagram);
+              console.log('Unknown serviceType %s of datagram[%j]',
+                KnxConstants.keyText(KnxConstants.SERVICE_TYPE, datagram.service_type),
+                datagram);
                 break;
         }
     }
     catch (e) {
-        console.error('Error processing datagram[%j], cause: %s', datagram, e.toLocaleString());
+        console.trace('Error processing datagram[%j], cause: %s', datagram, e.toLocaleString());
     }
 }
 

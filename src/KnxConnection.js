@@ -326,96 +326,74 @@ KnxConnection.prototype.TerminateStateRequest = function () {
     clearTimeout(this._stateRequestTimer);
 }
 
-// given a buffer and an offset, write out the local endpoint IPv4 address
-KnxConnection.prototype.appendLocalAddressAndPort = function (buf, offset) {
-	if (!this.localAddress || this.localAddress === '' || this.localAddress.indexOf('.') === -1 )
-		throw 'Need valid IPv4 address for local endpoint';
-
-	var result = new Buffer(4);
-	var aa = this.localAddress.split('.');
-	for (i = 0; i <= 3; i++) {
-		buf[offset+i] = parseInt(aa[i]) & 255;
-	}
-	var localPort = this.udpClient.address().port;
-	buf[offset + 4] = (localPort >> 8) & 255;
-	buf[offset + 5] = localPort & 255;
-};
-
 KnxConnection.prototype.ConnectRequest = function (callback) {
-    // HEADER
-		if (this.debug) console.log("ConnectRequest: init");
-    var datagram = new Buffer(26);
-    datagram[0] = 0x06;
-    datagram[1] = 0x10;
-    datagram[2] = 0x02;
-    datagram[3] = 0x05;
-    datagram[4] = 0x00;
-    datagram[5] = 0x1A;
-    datagram[6] = 0x08;
-    datagram[7] = 0x01;
-		this.appendLocalAddressAndPort(datagram, 8);
-    datagram[14] = 0x08;
-    datagram[15] = 0x01;
-		this.appendLocalAddressAndPort(datagram, 16);
-    datagram[22] = 0x04;
-    datagram[23] = 0x04;
-    datagram[24] = 0x02;
-    datagram[25] = 0x00;
-    try {
-        this.knxSender.SendDataSingle(datagram, callback);
-    }
-    catch (e) {
-        if (typeof callback === 'function') callback();
-    }
+	if (this.debug) console.log("ConnectRequest: init");
+  var datagram = this.prepareDatagram(KnxConstants.SERVICE_TYPE.CONNECT_REQUEST);
+  // add the tunneling request local endpoint
+  datagram.hpai = {
+    protocol_type:1, // UDP
+    tunnelEndpoint: this.localAddress + ":" + this.udpClient.address().port
+  };
+  // add the remote IP router's endpoint
+  datagram.tunn = {
+    protocol_type:1, // UDP
+    tunnelEndpoint: this.remoteEndpoint.addr + ':' + this.remoteEndpoint.port
+  }
+  // add the CRI
+  datagram.cri = {
+    connection_type:4, knx_layer:2, unused:0
+  }
+  try {
+    this.knxSender.SendDataSingle(datagram, callback);
+  }
+  catch (e) {
+    console.log(e);
+    if (typeof callback === 'function') callback();
+  }
 }
 
 KnxConnection.prototype.StateRequest = function (callback) {
-    // HEADER
-    var datagram = new Buffer(16);
-    datagram[0] = 0x06;
-    datagram[1] = 0x10;
-    datagram[2] = 0x02;
-    datagram[3] = 0x07;
-    datagram[4] = 0x00;
-    datagram[5] = 0x10;
-    datagram[6] = this.ChannelId;
-    datagram[7] = 0x00;
-    datagram[8] = 0x08;
-    datagram[9] = 0x01;
-		this.appendLocalAddressAndPort(datagram, 10);
-    try {
-        this.knxSender.SendData(datagram, callback);
-    }
-    catch (e) {
-        callback(e)
-    }
+  if (this.debug) console.log("ConnectRequest: init");
+  var datagram = prepareDatagram(KnxConstants.SERVICE_TYPE.CONNECTIONSTATE_REQUEST);
+  datagram.hpai.ip_addr = this.localAddress; // FIXME
+  datagram.hpai.ip_port = this.udpClient.address().port;
+  try {
+    this.knxSender.SendData(datagram, callback);
+  }
+  catch (e) {
+    callback(e)
+  }
 }
 
 KnxConnection.prototype.DisconnectRequest = function (callback) {
-    if(!this.connected) {
-        callback && callback();
-        return false;
-    }
-    // HEADER
-    var datagram = new Buffer(16);
-    datagram[0] = 0x06;
-    datagram[1] = 0x10;
-    datagram[2] = 0x02;
-    datagram[3] = 0x09;
-    datagram[4] = 0x00;
-    datagram[5] = 0x10;
-    datagram[6] = this.ChannelId;
-    datagram[7] = 0x00;
-    datagram[8] = 0x08;
-    datagram[9] = 0x01;
-		this.appendLocalAddressAndPort(datagram, 10);
+  if(!this.connected) {
+      callback && callback();
+      return false;
+  }
+  var datagram = prepareDatagram(KnxConstants.SERVICE_TYPE.DISCONNECT_REQUEST);
+  try {
+    this.knxSender.SendData(datagram, callback);
+  }
+  catch (e) {
+    callback(e)
+  }
+}
 
-    try {
-        this.knxSender.SendData(datagram, callback);
-    }
-    catch (e) {
-        callback(e)
-    }
+// prepare a datagram for the given service type
+KnxConnection.prototype.prepareDatagram = function (svcType) {
+  var datagram = {
+    "header_length":    6,
+    "protocol_version": 16, // 0x10 == version 1.0
+    "service_type": svcType,
+    "total_length": null, // filled in automatically
+  }
+  if (this.connection && this.connection.ChannelId) {
+    datagram.connstate = {
+      "channel_id": this.connection.ChannelId,
+      "seqnum":     this.connection.GenerateSequenceNumber()
+    };
+  }
+  return datagram;
 }
 
 module.exports = KnxConnection;

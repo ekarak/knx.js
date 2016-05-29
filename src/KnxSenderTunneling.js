@@ -3,7 +3,8 @@
  * refactored by ekarakou
  */
 var util = require('util');
-var KnxSender = require('./KnxSender');
+const KnxSender = require('./KnxSender');
+const KnxConstants = require('./KnxConstants');
 
 function KnxSenderTunneling(/*KnxConnection*/ connection) {
     KnxSenderTunneling.super_.call(this, connection);
@@ -13,6 +14,9 @@ util.inherits(KnxSenderTunneling, KnxSender);
 
 
 KnxSenderTunneling.prototype.SendTunnelingAck = function (sequenceNumber) {
+
+
+TUNNELLING_ACK
     // HEADER
     var datagram = new Buffer(10);
     datagram[0] = 0x06;
@@ -23,8 +27,8 @@ KnxSenderTunneling.prototype.SendTunnelingAck = function (sequenceNumber) {
     datagram[5] = 0x0A;
 
     datagram[6] = 0x04;
-    datagram[7] = this.connection.ChannelId;
-    datagram[8] = sequenceNumber;
+    datagram[7] =
+    datagram[8] =
     datagram[9] = 0x00;
 
     this.connection.udpClient.send(
@@ -70,8 +74,8 @@ KnxSenderTunneling.prototype.CreateRequestStatusDatagram = function (/*string*/ 
         var datagram = new Buffer(21);
         datagram[0] = 0x06;
         datagram[1] = 0x10;
-        datagram[2] = 0x04;
-        datagram[3] = 0x20;
+        datagram[2] = 0x04; // TUNNELING_REQUEST
+        datagram[3] = 0x20; //
         datagram[4] = 0x00;
         datagram[5] = 0x15;
         datagram[6] = 0x04;
